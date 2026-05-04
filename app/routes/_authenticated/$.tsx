@@ -18,7 +18,7 @@ function NotFoundPage() {
           </p>
         </div>
         <Button asChild>
-          <Link to="/agents">Back to Agents</Link>
+          <Link to="/whatsapp">Back to WhatsApp</Link>
         </Button>
       </div>
     </div>

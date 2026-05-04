@@ -46,18 +46,32 @@ export const createAuth = (env: CloudflareBindings) => {
       },
     }),
     socialProviders: {
-      github: {
-        clientId: env.GITHUB_CLIENT_ID,
-        clientSecret: env.GITHUB_CLIENT_SECRET,
-        mapProfileToUser: (profile) => {
-          return {
-            githubUsername: profile.login, // Map GitHub login to our custom field
-          };
-        },
-      },
+      ...(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
+        ? {
+            github: {
+              clientId: env.GITHUB_CLIENT_ID,
+              clientSecret: env.GITHUB_CLIENT_SECRET,
+              mapProfileToUser: (profile: { login: string }) => {
+                return {
+                  githubUsername: profile.login,
+                };
+              },
+            },
+          }
+        : {}),
+      ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+        ? {
+            google: {
+              clientId: env.GOOGLE_CLIENT_ID,
+              clientSecret: env.GOOGLE_CLIENT_SECRET,
+            },
+          }
+        : {}),
     },
     emailAndPassword: {
-      enabled: false, // Disable email/password auth, only OAuth
+      enabled: true,
+      autoSignIn: true,
+      minPasswordLength: 6,
     },
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,

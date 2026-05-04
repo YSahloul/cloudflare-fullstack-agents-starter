@@ -4,7 +4,7 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fp-cf-starter",
+  "name": "whatsapp-agents-saas",
   "main": "worker/index.ts",
   "compatibility_date": "2025-10-14",
   /**
@@ -31,8 +31,8 @@
   "placement": { "mode": "smart" },
 
   "vars": {
-    "CLOUDFLARE_ACCOUNT_ID": "my-cloudflare-account-id",
-    "CLOUDFLARE_AI_GATEWAY_ID": "fp-cf-starter"
+    "CLOUDFLARE_ACCOUNT_ID": "18bbe4caadfa4ce9b5e98acb3e1dcca3",
+    "CLOUDFLARE_AI_GATEWAY_ID": "whatsapp-agents-saas"
   },
   /**
    * Bindings
@@ -43,8 +43,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "fp-cf-starter",
-      "database_id": "fp-cf-starter-local-id",
+      "database_name": "whatsapp-agents-saas",
+      "database_id": "3ca07244-c82b-45fb-bfd9-0e0fd756b83f",
       "migrations_dir": "drizzle/migrations"
     }
   ],
@@ -57,6 +57,10 @@
       {
         "name": "PersonalAgent",
         "class_name": "PersonalAgent"
+      },
+      {
+        "name": "WhatsAppBotAgent",
+        "class_name": "WhatsAppBotAgent"
       }
     ]
   },
@@ -67,7 +71,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["PersonalAgent"]
+      "new_sqlite_classes": ["PersonalAgent", "WhatsAppBotAgent"]
     }
   ],
   /**
@@ -83,20 +87,25 @@
    * Service Bindings (communicate between multiple Workers)
    * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
    */
-  // "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+  "services": [
+    {
+      "binding": "WHATSAPP",
+      "service": "waha-cloudflare"
+    }
+  ],
   "env": {
     "preview": {
-      "name": "fp-cf-starter-preview",
+      "name": "whatsapp-agents-saas-preview",
       "observability": { "enabled": true },
       "vars": {
-        "CLOUDFLARE_ACCOUNT_ID": "my-cloudflare-account-id",
-        "CLOUDFLARE_AI_GATEWAY_ID": "fp-cf-starter-preview"
+        "CLOUDFLARE_ACCOUNT_ID": "18bbe4caadfa4ce9b5e98acb3e1dcca3",
+        "CLOUDFLARE_AI_GATEWAY_ID": "whatsapp-agents-saas-preview"
       },
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "fp-cf-starter-preview",
-          "database_id": "fp-cf-starter-preview-local-id",
+          "database_name": "whatsapp-agents-saas-preview",
+          "database_id": "e1787a42-7860-4c2c-9f36-22d1d20b4da0",
           "migrations_dir": "drizzle/migrations"
         }
       ],
@@ -105,13 +114,23 @@
           {
             "name": "PersonalAgent",
             "class_name": "PersonalAgent"
+          },
+          {
+            "name": "WhatsAppBotAgent",
+            "class_name": "WhatsAppBotAgent"
           }
         ]
       },
       "migrations": [
         {
           "tag": "v1",
-          "new_sqlite_classes": ["PersonalAgent"]
+          "new_sqlite_classes": ["PersonalAgent", "WhatsAppBotAgent"]
+        }
+      ],
+      "services": [
+        {
+          "binding": "WHATSAPP",
+          "service": "waha-cloudflare"
         }
       ]
     }

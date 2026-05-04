@@ -1,182 +1,86 @@
 # GitHub Actions Workflows
 
-This directory contains GitHub Actions workflows for continuous integration and deployment of the application.
-
-## Overview
-
-The workflows are configured to run tests automatically but keep deployments **disabled by default** in the template. This allows you to use the CI/CD infrastructure when you're ready, while preventing accidental deployments.
+This repository deploys through GitHub Actions.
 
 ## Workflows
 
-### 1. Test PALS (`pals-test.yaml`)
+### Test PALS (`pals-test.yaml`)
 
-**Trigger**: Automatically runs on:
-- Push to `main` branch
-- Pull requests to any branch
+Runs on:
+- pushes to `main`
+- pull requests
 
-**Purpose**: Validates code quality and ensures the application builds successfully.
+Jobs:
+- `test`: installs dependencies, runs lint, typecheck, unit tests, Drizzle schema check, and build
+- `deploy-to-preview`: deploys preview automatically after `test` passes on pushes to `main`
 
-**Jobs**:
-- **test**: Runs linting, type checking, unit tests, database schema validation, and builds
-- **deploy-to-preview**: ⚠️ **DISABLED BY DEFAULT** - Would deploy to preview environment on main branch pushes
+### Deploy PALS (`pals-deploy.yaml`)
 
-**What it does**:
-1. Sets up Bun and Biome
-2. Installs dependencies
-3. Runs `bun run lint` (Biome formatting check)
-4. Runs `bun run typecheck` (TypeScript type checking)
-5. Runs `bun run test run` (Vitest unit tests)
-6. Checks for uncommitted Drizzle schema changes
-7. Runs `bun run build` (Production build validation)
+Reusable deployment workflow used by preview and manual deployments.
 
-### 2. Deploy PALS (`pals-deploy.yaml`)
+For the selected environment it:
+1. installs dependencies
+2. builds the app
+3. applies D1 migrations
+4. deploys the Cloudflare Worker with Wrangler
+5. uploads Worker secrets
 
-**Trigger**: Reusable workflow (called by other workflows)
+### Deploy PALS (manual) (`pals-deploy-manual.yaml`)
 
-**Purpose**: Shared deployment logic for both manual and automatic deployments.
+Manual workflow dispatch from the GitHub Actions UI.
 
-**Status**: ⚠️ **Available but not automatically triggered** - This workflow is functional but only runs when explicitly called.
+Use it for:
+- preview deploys on demand
+- production deploys on demand
 
-**What it does**:
-1. Builds the application (with environment-specific config)
-2. Runs database migrations (preview or prod)
-3. Deploys the worker to Cloudflare using Wrangler
-4. Configures required secrets for the deployed application
-
-### 3. Deploy PALS (manual) (`pals-deploy-manual.yaml`)
-
-**Trigger**: Manual workflow dispatch via GitHub Actions UI
-
-**Purpose**: Allows on-demand deployments to preview or production environments.
-
-**Status**: ✅ **Ready to use** (once secrets are configured)
-
-**How to use**:
-1. Go to the **Actions** tab in your GitHub repository
-2. Select **Deploy PALS (manual)** from the workflows list
+Steps:
+1. Go to GitHub Actions
+2. Select **Deploy PALS (manual)**
 3. Click **Run workflow**
-4. Choose the environment (`preview` or `prod`)
-5. Click **Run workflow** to start the deployment
+4. Choose `preview` or `prod`
+5. Run
 
-## Enabling Automatic Deployments
+## Required GitHub Actions secrets
 
-By default, automatic deployments are **disabled** to prevent accidental deploys from the template. To enable them:
+Configure these in GitHub repository settings:
 
-### Step 1: Configure GitHub Secrets
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | yes | Wrangler deploy and D1 migrations |
+| `CLOUDFLARE_ACCOUNT_ID` | yes | Cloudflare account |
+| `ANTHROPIC_API_KEY` | yes | Agent model access |
+| `OPENAI_API_KEY` | yes | WhatsApp bot model access |
+| `WHATSAPP_API_KEY` | yes | Authenticates Baileys container webhooks |
+| `ADMIN_API_KEY` | yes | Admin/API operations |
+| `BETTER_AUTH_SECRET` | yes | Better Auth secret |
+| `BETTER_AUTH_URL` | yes | Public app URL for auth callbacks |
+| `GITHUB_CLIENT_ID` | optional | GitHub OAuth |
+| `GITHUB_CLIENT_SECRET` | optional | GitHub OAuth |
+| `GOOGLE_CLIENT_ID` | optional | Google OAuth |
+| `GOOGLE_CLIENT_SECRET` | optional | Google OAuth |
 
-Add the following secrets to your GitHub repository (Settings > Secrets and variables > Actions):
+## Deploy behavior
 
-#### Required Secrets
+### Preview
 
-| Secret Name | Description | Where to get it |
-|------------|-------------|-----------------|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Workers deployment permissions | [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) - Create token with "Edit Cloudflare Workers" permissions |
-| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID | Found in Cloudflare Dashboard > Workers & Pages > Overview |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude AI features | [Anthropic Console](https://console.anthropic.com/) |
-| `OPENAI_API_KEY` | OpenAI API key (optional, for OpenAI features) | [OpenAI Platform](https://platform.openai.com/api-keys) |
+Preview deploys happen automatically when code is pushed to `main` and tests pass.
 
-### Step 2: Enable the Deploy Job
+Equivalent command path in CI:
 
-Edit `.github/workflows/pals-test.yaml` and modify the `deploy-to-preview` job:
-
-**Change this:**
-```yaml
-deploy-to-preview:
-  name: Deploy PALS
-  uses: ./.github/workflows/pals-deploy.yaml
-  needs: test
-  if: false  # Disabled in template - see comment above to enable
-  with:
-    environment: preview
-  secrets: inherit
+```sh
+bun run ci:db:migrate:preview
+CLOUDFLARE_ENV=preview bun run build
+wrangler deploy --config dist/whatsapp_agents_saas/wrangler.json
 ```
 
-**To this:**
-```yaml
-deploy-to-preview:
-  name: Deploy PALS
-  uses: ./.github/workflows/pals-deploy.yaml
-  needs: test
-  if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-  with:
-    environment: preview
-  secrets: inherit
+### Production
+
+Production deploys are manual from GitHub Actions using **Deploy PALS (manual)** with `environment=prod`.
+
+Equivalent command path in CI:
+
+```sh
+bun run ci:db:migrate:prod
+bun run build
+wrangler deploy --config dist/whatsapp_agents_saas/wrangler.json
 ```
-
-### Step 3: Test the Deployment
-
-Push a commit to your `main` branch and verify:
-1. The test job completes successfully
-2. The deploy-to-preview job runs
-3. Your application is deployed to Cloudflare Workers
-
-## Using Manual Deployments
-
-Even with automatic deployments disabled, you can deploy manually at any time:
-
-1. Configure the required GitHub secrets (see above)
-2. Use the **Deploy PALS (manual)** workflow from the Actions tab
-3. Choose your target environment (preview or prod)
-
-This is useful for:
-- Testing deployments before enabling automatic deploys
-- Deploying hotfixes without waiting for CI
-- Deploying to production with explicit approval
-
-## Customizing for Your Environment
-
-### Monorepo Setup
-
-If you're moving this template into a monorepo, you'll need to:
-
-1. Uncomment the `working-directory` parameters in the workflow files
-2. Update the paths to point to your app directory (e.g., `apps/pals`)
-3. Update the `workingDirectory` in the Wrangler deployment step
-
-Look for comments in the workflow files marked with:
-```yaml
-# NOTE - if you are putting the template into a monorepo, you'll need the "working-directory" param here:
-```
-
-### Environment Variables
-
-The workflows support two environments:
-- **preview**: For staging/testing (`CLOUDFLARE_ENV=preview`)
-- **prod**: For production (default, no env variable)
-
-You can customize the build and deployment behavior by:
-- Modifying the build commands in `pals-deploy.yaml`
-- Adjusting the migration commands for your database setup
-- Adding additional deployment steps or environments
-
-## Troubleshooting
-
-### Build Failures
-
-If builds fail in CI but work locally:
-- Ensure `bun.lock` is committed (workflow uses `--frozen-lockfile`)
-- Check that all dependencies are properly declared in `package.json`
-- Verify that environment-specific code doesn't rely on local-only resources
-
-### Deployment Failures
-
-If deployments fail:
-- Verify all required secrets are configured correctly
-- Check Cloudflare API token has the necessary permissions
-- Review the Wrangler logs in the GitHub Actions output
-- Ensure your `wrangler.jsonc` is properly configured
-
-### Schema Migration Issues
-
-If the schema check fails:
-- Run `bun run db:generate` locally
-- Commit any generated migration files
-- Push the changes and re-run the workflow
-
-## Additional Resources
-
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-- [Wrangler CLI Documentation](https://developers.cloudflare.com/workers/wrangler/)
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Bun Documentation](https://bun.sh/docs)
-

@@ -57,7 +57,5 @@ const RootLayout = () => {
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
-  errorComponent: ({ error, reset }) => (
-    <RootErrorBoundary error={error} reset={reset} />
-  ),
+  errorComponent: ({ error, reset }) => <RootErrorBoundary error={error} reset={reset} />,
 });

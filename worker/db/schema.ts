@@ -33,3 +33,38 @@ export const personalAgents = sqliteTable("personal_agents", {
 
 export type PersonalAgentSelect = typeof personalAgents.$inferSelect;
 export type PersonalAgentInsert = typeof personalAgents.$inferInsert;
+
+export const whatsappSessions = sqliteTable("whatsapp_sessions", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => nanoid())
+    .notNull(),
+  gatewaySessionId: text("gateway_session_id")
+    .notNull()
+    .$defaultFn(() => `wa_${nanoid()}`)
+    .unique(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "cascade" }),
+  displayName: text("display_name").notNull(),
+  status: text("status", { length: 20 }).notNull().default("disconnected"),
+  // AI config stored directly on the session
+  systemPrompt: text("system_prompt"),
+  model: text("model").default("gpt-4.1-mini"),
+  temperature: integer("temperature").default(20),
+  maxTokens: integer("max_tokens").default(900),
+  groupPolicy: text("group_policy", { length: 20 }).default("mention"),
+  dmPolicy: text("dm_policy", { length: 20 }).default("always"),
+  autoReply: integer("auto_reply", { mode: "boolean" }).default(true),
+  webhookUrl: text("webhook_url"),
+  createdAt: integer({ mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+  updatedAt: integer({ mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+export type WhatsAppSessionSelect = typeof whatsappSessions.$inferSelect;
+export type WhatsAppSessionInsert = typeof whatsappSessions.$inferInsert;

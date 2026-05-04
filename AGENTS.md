@@ -295,4 +295,3 @@ bun format
 ## CLI/Development Guidelines
 
 - Never run commands with npx in this workspace (always try to use package.json listed ones)
-- Never deploy the app, leave that to the user

@@ -14,3 +14,7 @@ GITHUB_CLIENT_SECRET=
 # AI configuration
 ANTHROPIC_API_KEY=
 OPENAI_API_KEY=
+
+# WhatsApp gateway
+WHATSAPP_API_KEY=whatsapp-gateway-secret-change-me
+ADMIN_API_KEY=dream-admin-key-2026

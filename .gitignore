@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Local agent scratch files
+.pi/
+
+# Local OAuth/client secrets
+client_secret_*.json
+*.apps.googleusercontent.com.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

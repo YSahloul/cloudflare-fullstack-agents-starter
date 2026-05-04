@@ -97,19 +97,18 @@ export function useCreatePersonalAgentMutation() {
       };
 
       // Optimistically add to cache
-      queryClient.setQueryData<PersonalAgent[]>(
-        [PERSONAL_AGENTS_KEY],
-        (old = []) => [...old, optimisticAgent],
-      );
+      queryClient.setQueryData<PersonalAgent[]>([PERSONAL_AGENTS_KEY], (old = []) => [
+        ...old,
+        optimisticAgent,
+      ]);
 
       return { previousAgents, optimisticAgent };
     },
 
     // Replace optimistic agent with real data from server
     onSuccess: (data, _variables, context) => {
-      queryClient.setQueryData<PersonalAgent[]>(
-        [PERSONAL_AGENTS_KEY],
-        (old = []) => old.map((agent) => (agent.id === context?.optimisticAgent.id ? data : agent)),
+      queryClient.setQueryData<PersonalAgent[]>([PERSONAL_AGENTS_KEY], (old = []) =>
+        old.map((agent) => (agent.id === context?.optimisticAgent.id ? data : agent)),
       );
     },
 

@@ -80,16 +80,11 @@ jobs:
         # working-directory: apps/pals
         run: bun run build
 
-  # TEMPLATE NOTE: Automatic deployments are disabled by default.
-  # To enable automatic deployments on pushes to main, change the if condition below to:
-  # if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-  # 
-  # You will also need to configure the required GitHub secrets (see .github/README.md)
   deploy-to-preview:
-    name: Deploy PALS
+    name: Deploy PALS Preview
     uses: ./.github/workflows/pals-deploy.yaml
     needs: test
-    if: false  # Disabled in template - see comment above to enable
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     with:
       environment: preview
     secrets: inherit

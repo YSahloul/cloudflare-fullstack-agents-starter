@@ -1,4 +1,4 @@
-import { Bot } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import DiscordLogo from "@/app/assets/brand-logos/Discord.svg?react";
 import { SidebarTrigger } from "@/app/components/ui/sidebar";
 import { DISCORD_INVITE_URL } from "@/app/constants";
@@ -9,7 +9,7 @@ export function AppHeader() {
       <div className="flex items-center gap-4">
         <SidebarTrigger className="-ml-1" />
         <div className="flex md:hidden">
-          <Bot className="h-6 w-6" />
+          <MessageSquare className="h-6 w-6" />
         </div>
       </div>
       <a

@@ -26,8 +26,8 @@
     "auth:generate": "bunx @better-auth/cli@latest generate --config better-auth.config.ts",
     "seed:playwright": "bun run scripts/seed-playwright-user.ts",
     "ci:db:generate": "bun run db:touch && bun run db:generate",
-    "ci:deploy": "bun run build && cd dist/fp_cf_starter && bun wrangler deploy --env=''",
-    "ci:deploy:preview": "CLOUDFLARE_ENV=preview bun run build && cd dist/fp_cf_starter && CLOUDFLARE_ENV=preview bun wrangler deploy --env=''",
+    "ci:deploy": "bun run build && cd dist/whatsapp_agents_saas && bun wrangler deploy --config wrangler.json --env=''",
+    "ci:deploy:preview": "CLOUDFLARE_ENV=preview bun run build && cd dist/whatsapp_agents_saas && CLOUDFLARE_ENV=preview bun wrangler deploy --config wrangler.json --env=''",
     "ci:db:migrate:preview": "wrangler d1 migrations apply DB --remote --env preview",
     "ci:db:migrate:prod": "wrangler d1 migrations apply DB --remote"
   },

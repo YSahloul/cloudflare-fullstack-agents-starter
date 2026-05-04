@@ -1,13 +1,5 @@
 ---
-# TEMPLATE NOTE: This is a reusable deployment workflow.
-# It is currently disabled by default in the test workflow (pals-test.yaml).
-# 
-# To enable deployments, you need to:
-# 1. Configure GitHub secrets (see .github/README.md for required secrets)
-# 2. Enable the deploy-to-preview job in pals-test.yaml
-# 3. Optionally, customize the deployment steps for your environment
-#
-# This workflow can also be triggered manually via pals-deploy-manual.yaml
+# Reusable deployment workflow used by automatic preview deploys and manual deploys.
 name: Deploy PALS
 on:
   workflow_call:
@@ -23,7 +15,25 @@ on:
       CLOUDFLARE_ACCOUNT_ID:
         required: true
       ANTHROPIC_API_KEY:
-          required: true
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      WHATSAPP_API_KEY:
+        required: true
+      ADMIN_API_KEY:
+        required: true
+      BETTER_AUTH_SECRET:
+        required: true
+      BETTER_AUTH_URL:
+        required: true
+      GITHUB_CLIENT_ID:
+        required: false
+      GITHUB_CLIENT_SECRET:
+        required: false
+      GOOGLE_CLIENT_ID:
+        required: false
+      GOOGLE_CLIENT_SECRET:
+        required: false
 
 jobs:
   deploy:
@@ -87,12 +97,28 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # NOTE - if you are putting the template into a monorepor, you'll need the "workingDirectory" param here:
           # workingDirectory: "apps/pals/dist/pals"
-          workingDirectory: "dist/fp_cf_starter"
-          command: deploy --config dist/fp_cf_starter/wrangler.json
+          workingDirectory: "dist/whatsapp_agents_saas"
+          command: deploy --config wrangler.json
           secrets: |
             ANTHROPIC_API_KEY
             OPENAI_API_KEY
+            WHATSAPP_API_KEY
+            ADMIN_API_KEY
+            BETTER_AUTH_SECRET
+            BETTER_AUTH_URL
+            GITHUB_CLIENT_ID
+            GITHUB_CLIENT_SECRET
+            GOOGLE_CLIENT_ID
+            GOOGLE_CLIENT_SECRET
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          WHATSAPP_API_KEY: ${{ secrets.WHATSAPP_API_KEY }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
+          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           WRANGLER_LOG: "debug"

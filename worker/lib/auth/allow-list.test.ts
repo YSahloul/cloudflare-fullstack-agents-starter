@@ -1,22 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
 
 // Mock the env-utils module before importing allow-list
-// This prevents "cloudflare:workers" module issues in tests
-// The mock is hoisted by vitest, so it will be in place before allow-list is imported
 vi.mock("../env-utils", () => ({
   isDevelopmentEnv: vi.fn(() => false),
 }));
 
-import { isAllowedGitHubUsername } from "./allow-list";
+import { allowListMiddleware } from "./allow-list";
 
-describe("isAllowedGitHubUsername", () => {
-  it("should allow the username brettimus", async () => {
-    const isAllowed = await isAllowedGitHubUsername("brettimus");
-    expect(isAllowed).toBe(true);
+describe("allowListMiddleware", () => {
+  it("should allow authenticated users through", async () => {
+    const c = {
+      req: { url: "https://example.com/api/whatsapp/agents" },
+      get: vi.fn(() => ({ id: "user-1", email: "test@example.com" })),
+    } as any;
+    const next = vi.fn();
+
+    await allowListMiddleware(c, next);
+    expect(next).toHaveBeenCalled();
   });
 
-  it("should not allow the playwright test user when isDevelopmentEnv is false", async () => {
-    const isAllowed = await isAllowedGitHubUsername("fpc-test-nae4-playwright-user");
-    expect(isAllowed).toBe(false);
+  it("should block unauthenticated users", async () => {
+    const c = {
+      req: { url: "https://example.com/api/whatsapp/agents" },
+      get: vi.fn(() => null),
+    } as any;
+    const next = vi.fn();
+
+    await expect(allowListMiddleware(c, next)).rejects.toThrow("Unauthorized");
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("should skip auth routes", async () => {
+    const c = {
+      req: { url: "https://example.com/api/auth/sign-in" },
+      get: vi.fn(() => null),
+    } as any;
+    const next = vi.fn();
+
+    await allowListMiddleware(c, next);
+    expect(next).toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { Link, useRouteContext, useRouterState } from "@tanstack/react-router";
-import { Bot, LogOut, Settings } from "lucide-react";
+import { LogOut, MessageSquare, Settings } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/app/components/ui/avatar";
 import {
   DropdownMenu,
@@ -25,9 +25,9 @@ import type { RouterContext } from "@/app/routes/__root";
 
 const navItems = [
   {
-    title: "Agents",
-    icon: Bot,
-    to: "/agents",
+    title: "WhatsApp",
+    icon: MessageSquare,
+    to: "/whatsapp",
   },
   {
     title: "Settings",
@@ -105,8 +105,8 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="flex h-14 items-center border-b border-sidebar-border md:h-16">
         <div className="flex items-center gap-2 px-2 h-full mr-auto">
-          <Bot className="h-6 w-6" />
-          <span className="text-lg font-semibold text-sidebar-foreground">Pals</span>
+          <MessageSquare className="h-6 w-6" />
+          <span className="text-lg font-semibold text-sidebar-foreground">WhatsApp Agents</span>
         </div>
       </SidebarHeader>
       <SidebarContent>
