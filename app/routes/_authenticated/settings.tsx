@@ -47,7 +47,6 @@ function Settings() {
 
     try {
       await authClient.deleteUser();
-      // Force a full page reload to clear auth state and redirect to home
       window.location.href = "/";
     } catch (error) {
       console.error("Failed to delete account:", error);
@@ -57,7 +56,7 @@ function Settings() {
   };
 
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="max-w-4xl space-y-8">
       <div className="flex items-center gap-3">
         <SettingsIcon className="h-8 w-8 text-primary" />
         <h1 className="text-2xl font-bold text-foreground md:text-3xl">Settings</h1>

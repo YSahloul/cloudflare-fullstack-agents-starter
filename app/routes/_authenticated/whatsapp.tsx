@@ -1,18 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import {
-  Loader2,
-  LogOut,
-  MessageSquare,
-  Phone,
-  Play,
-  Plus,
-  QrCode,
-  RotateCcw,
-  Smartphone,
-  Square,
-  Trash2,
-} from "lucide-react";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Loader2, MessageSquare, RefreshCcw, Smartphone } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { PageErrorState } from "@/app/components/PageErrorState";
 import { PageLoadingState } from "@/app/components/PageLoadingState";
 import { Button } from "@/app/components/ui/button";
@@ -21,10 +10,11 @@ import { Skeleton } from "@/app/components/ui/skeleton";
 import {
   useCreateWhatsAppSessionMutation,
   useGetQrQuery,
+  useGetWhatsAppSessionQuery,
   useListWhatsAppSessionsQuery,
   usePairCodeMutation,
   useStartSessionMutation,
-  useStopSessionMutation,
+  WHATSAPP_KEY,
 } from "@/app/lib/queries/whatsapp";
 
 export const Route = createFileRoute("/_authenticated/whatsapp")({
@@ -41,363 +31,395 @@ export const Route = createFileRoute("/_authenticated/whatsapp")({
   ),
 });
 
-/* ── Status helpers ──────────────────────────────────────────────────────── */
-
-function getStatusMeta(status: string) {
-  switch (status) {
-    case "connected":
-      return {
-        label: "Connected",
-        dot: "bg-green-500",
-        bg: "bg-green-50 dark:bg-green-950/30",
-        text: "text-green-700 dark:text-green-400",
-        border: "border-green-200 dark:border-green-900",
-      };
-    case "connecting":
-      return {
-        label: "Starting",
-        dot: "bg-yellow-400",
-        bg: "bg-yellow-50 dark:bg-yellow-950/30",
-        text: "text-yellow-700 dark:text-yellow-400",
-        border: "border-yellow-200 dark:border-yellow-900",
-      };
-    case "qr":
-      return {
-        label: "Scan QR",
-        dot: "bg-yellow-400",
-        bg: "bg-yellow-50 dark:bg-yellow-950/30",
-        text: "text-yellow-700 dark:text-yellow-400",
-        border: "border-yellow-200 dark:border-yellow-900",
-      };
-    case "pairing":
-      return {
-        label: "Pairing",
-        dot: "bg-blue-400",
-        bg: "bg-blue-50 dark:bg-blue-950/30",
-        text: "text-blue-700 dark:text-blue-400",
-        border: "border-blue-200 dark:border-blue-900",
-      };
-    case "reconnecting":
-      return {
-        label: "Reconnecting",
-        dot: "bg-yellow-400",
-        bg: "bg-yellow-50 dark:bg-yellow-950/30",
-        text: "text-yellow-700 dark:text-yellow-400",
-        border: "border-yellow-200 dark:border-yellow-900",
-      };
-    case "stopped":
-      return {
-        label: "Stopped",
-        dot: "bg-gray-400",
-        bg: "bg-gray-50 dark:bg-gray-900/30",
-        text: "text-gray-600 dark:text-gray-400",
-        border: "border-gray-200 dark:border-gray-800",
-      };
-    case "logged_out":
-      return {
-        label: "Logged Out",
-        dot: "bg-red-500",
-        bg: "bg-red-50 dark:bg-red-950/30",
-        text: "text-red-700 dark:text-red-400",
-        border: "border-red-200 dark:border-red-900",
-      };
-    default:
-      return {
-        label: status || "Unknown",
-        dot: "bg-gray-400",
-        bg: "bg-gray-50 dark:bg-gray-900/30",
-        text: "text-gray-600 dark:text-gray-400",
-        border: "border-gray-200 dark:border-gray-800",
-      };
+function badgeClass(status: string) {
+  if (status === "connected") {
+    return "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-400";
   }
+
+  if (
+    status === "qr" ||
+    status === "pairing" ||
+    status === "connecting" ||
+    status === "reconnecting"
+  ) {
+    return "bg-yellow-500/10 text-yellow-700 border-yellow-500/20 dark:text-yellow-400";
+  }
+
+  return "bg-muted text-muted-foreground border-border";
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const m = getStatusMeta(status);
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${m.bg} ${m.text} ${m.border}`}
+      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClass(status)}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />
-      {m.label}
+      {status || "stopped"}
     </span>
   );
 }
 
-/* ── Main page ───────────────────────────────────────────────────────────── */
+function formatPairCode(code: string) {
+  if (code.length === 8) {
+    return `${code.slice(0, 4)}-${code.slice(4)}`;
+  }
 
-function WhatsAppPage() {
-  const { data: sessions, isLoading, isError } = useListWhatsAppSessionsQuery();
-  const [newName, setNewName] = useState("");
-  const create = useCreateWhatsAppSessionMutation();
-  const start = useStartSessionMutation();
-
-  const handleAdd = async () => {
-    const name = newName.trim() || "WhatsApp";
-    setNewName("");
-    const session = await create.mutateAsync({ displayName: name });
-    await start.mutateAsync(session.id);
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <MessageSquare className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold text-foreground md:text-3xl">WhatsApp Sessions</h1>
-        </div>
-      </div>
-
-      <p className="text-muted-foreground">
-        Connect your WhatsApp accounts. Start a session and scan the QR code or use a pairing code.
-      </p>
-
-      {/* Add session */}
-      <div className="rounded-lg border bg-card p-5 shadow-sm">
-        <div className="flex items-center gap-3">
-          <Input
-            type="text"
-            placeholder="Session name (optional)"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            className="max-w-xs"
-          />
-          <Button onClick={handleAdd} disabled={create.isPending || start.isPending}>
-            {create.isPending || start.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="mr-2 h-4 w-4" />
-            )}
-            Add & Start
-          </Button>
-        </div>
-      </div>
-
-      {/* List */}
-      {isLoading && (
-        <div className="space-y-3">
-          {[1, 2].map((i) => (
-            <div key={i} className="rounded-lg border bg-card p-5">
-              <Skeleton className="mb-2 h-5 w-1/4" />
-              <Skeleton className="h-4 w-1/3" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {isError && (
-        <div className="rounded-lg border border-destructive bg-destructive/10 p-4">
-          <p className="text-sm text-destructive">Failed to load sessions. Please try again.</p>
-        </div>
-      )}
-
-      {!isLoading && !isError && sessions && sessions.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-card p-12 text-center">
-          <Smartphone className="mb-4 h-12 w-12 text-muted-foreground" />
-          <h3 className="mb-2 text-lg font-semibold text-card-foreground">No Sessions</h3>
-          <p className="text-sm text-muted-foreground">
-            Add a session to connect your WhatsApp account.
-          </p>
-        </div>
-      )}
-
-      {!isLoading && !isError && sessions && sessions.length > 0 && (
-        <div className="space-y-4">
-          {sessions.map((s) => (
-            <SessionCard key={s.id} session={s} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return code;
 }
 
-/* ── Session card ────────────────────────────────────────────────────────── */
-
-function SessionCard({
-  session,
-}: {
-  session: { id: string; displayName: string; status: string };
-}) {
-  const meta = getStatusMeta(session.status);
-  const isRunning = ["connected", "connecting", "qr", "pairing", "reconnecting"].includes(
-    session.status,
-  );
-  const [showQr, setShowQr] = useState(false);
-  const [phone, setPhone] = useState("");
-  const [pairCode, setPairCode] = useState<string | null>(null);
-  const { data: qrData, isFetching: qrLoading } = useGetQrQuery(showQr ? session.id : "");
-  const pair = usePairCodeMutation();
+function WhatsAppPage() {
+  const qc = useQueryClient();
+  const { data: sessions, isLoading, isError } = useListWhatsAppSessionsQuery();
+  const create = useCreateWhatsAppSessionMutation();
   const start = useStartSessionMutation();
-  const stop = useStopSessionMutation();
+  const pair = usePairCodeMutation();
 
-  const needsStart = ["stopped", "logged_out", "disconnected"].includes(session.status);
-  const canConnect = ["connecting", "qr", "pairing", "reconnecting"].includes(session.status);
-  const isPairing = session.status === "pairing";
+  const [sid, setSid] = useState("default");
+  const [phone, setPhone] = useState("");
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [localPairCode, setLocalPairCode] = useState<string | null>(null);
+  const [isStopping, setIsStopping] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+
+  const activeSessionQuery = useGetWhatsAppSessionQuery(activeSessionId ?? "");
+  const activeSession = activeSessionQuery.data;
+
+  const showQr = activeSession?.status === "qr" && !!activeSession?.hasQr;
+  const qrQuery = useGetQrQuery(showQr && activeSession ? activeSession.id : "");
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setLocalPairCode(null);
+      return;
+    }
+
+    if (activeSession?.pairingCode) {
+      setLocalPairCode(activeSession.pairingCode);
+      return;
+    }
+
+    if (activeSession?.status === "connected") {
+      setLocalPairCode(null);
+    }
+  }, [activeSession?.pairingCode, activeSession?.status, activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    if (activeSession?.status === "connected" || activeSession?.status === "stopped") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "sessions"] });
+      void qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", activeSessionId] });
+      void qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "qr", activeSessionId] });
+    }, 2000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeSession?.status, activeSessionId, qc]);
+
+  const activeSessionPairCode = useMemo(() => {
+    if (activeSession?.pairingCode) {
+      return activeSession.pairingCode;
+    }
+
+    return localPairCode;
+  }, [activeSession?.pairingCode, localPairCode]);
+
+  const visibleSessions = useMemo(() => {
+    if (!activeSessionId) {
+      return sessions ?? [];
+    }
+
+    return sessions?.filter((session) => session.id !== activeSessionId) ?? [];
+  }, [activeSessionId, sessions]);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "sessions"] });
+    if (activeSessionId) {
+      await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", activeSessionId] });
+      await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "qr", activeSessionId] });
+    }
+  }
+
+  async function ensureSession(sessionName: string) {
+    const existing = sessions?.find(
+      (session) => session.id === sessionName || session.displayName === sessionName,
+    );
+    if (existing) {
+      return existing;
+    }
+
+    return create.mutateAsync({ displayName: sessionName });
+  }
+
+  async function handleStart(usePair: boolean) {
+    const sessionName = sid.trim();
+    const cleanPhone = phone.replace(/\D/g, "");
+    setError("");
+
+    if (!sessionName) {
+      return;
+    }
+
+    if (usePair && !cleanPhone) {
+      setError("Phone number required for pairing.");
+      return;
+    }
+
+    try {
+      const session = await ensureSession(sessionName);
+      setActiveSessionId(session.id);
+      setLocalPairCode(null);
+
+      if (usePair) {
+        await fetch(`/api/whatsapp/sessions/${session.id}/logout`, { method: "POST" }).catch(
+          () => null,
+        );
+        const result = await pair.mutateAsync({ id: session.id, phone: cleanPhone });
+        setLocalPairCode(result.code ?? null);
+      } else {
+        await start.mutateAsync(session.id);
+      }
+
+      await refresh();
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : String(caughtError);
+      setError(message);
+    }
+  }
+
+  async function handleStop(sessionId: string) {
+    setIsStopping(true);
+    try {
+      await fetch(`/api/whatsapp/sessions/${sessionId}/stop`, { method: "POST" });
+      await refresh();
+    } finally {
+      setIsStopping(false);
+    }
+  }
+
+  async function handleLogout(sessionId: string) {
+    setIsLoggingOut(true);
+    try {
+      await fetch(`/api/whatsapp/sessions/${sessionId}/logout`, { method: "POST" });
+      setLocalPairCode(null);
+      await refresh();
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
+
+  async function handleDelete(sessionId: string) {
+    if (!confirm(`Delete ${sessionId}?`)) {
+      return;
+    }
+
+    setIsDeleting(sessionId);
+    try {
+      await fetch(`/api/whatsapp/sessions/${sessionId}`, { method: "DELETE" });
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setLocalPairCode(null);
+      }
+      await refresh();
+    } finally {
+      setIsDeleting(null);
+    }
+  }
+
+  async function pickSession(sessionId: string) {
+    setActiveSessionId(sessionId);
+    setSid(sessionId);
+    setError("");
+    setLocalPairCode(null);
+    await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", sessionId] });
+  }
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
-      {/* Card header */}
-      <div className="flex items-center justify-between px-5 py-4">
-        <div className="flex items-center gap-3">
-          <div
-            className={`flex h-10 w-10 items-center justify-center rounded-lg border ${meta.bg} ${meta.border}`}
-          >
-            <Smartphone className={`h-5 w-5 ${meta.text}`} />
-          </div>
-          <div>
-            <p className="font-medium">{session.displayName}</p>
-            <p className="text-xs text-muted-foreground font-mono">{session.id}</p>
-          </div>
-        </div>
-        <StatusBadge status={session.status} />
+    <div className="mx-auto max-w-3xl space-y-4">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-6 w-6 text-primary" />
+        <h1 className="text-xl font-semibold">WhatsApp Gateway</h1>
       </div>
 
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2 px-5 pb-4">
-        {!isRunning ? (
-          <Button size="sm" onClick={() => start.mutate(session.id)} disabled={start.isPending}>
-            <Play className="mr-1.5 h-3.5 w-3.5" />
-            Start
-          </Button>
-        ) : (
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+          <Input
+            placeholder="session id (e.g. tenant-slug)"
+            value={sid}
+            onChange={(event) => setSid(event.target.value)}
+          />
           <Button
-            size="sm"
-            variant="outline"
-            onClick={() => stop.mutate(session.id)}
-            disabled={stop.isPending}
+            onClick={() => void handleStart(false)}
+            disabled={create.isPending || start.isPending || pair.isPending}
           >
-            <Square className="mr-1.5 h-3.5 w-3.5" />
-            Stop
+            {create.isPending || start.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            Start / Connect
           </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => start.mutate(session.id)}
-          disabled={start.isPending}
-        >
-          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-          Restart
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-          onClick={async () => {
-            await fetch(`/api/whatsapp/sessions/${session.id}/logout`, { method: "POST" });
-            window.location.reload();
-          }}
-        >
-          <LogOut className="mr-1.5 h-3.5 w-3.5" />
-          Logout
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-          onClick={async () => {
-            if (!confirm("Delete this session?")) {
-              return;
-            }
-            await fetch(`/api/whatsapp/sessions/${session.id}`, { method: "DELETE" });
-            window.location.reload();
-          }}
-        >
-          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-          Delete
-        </Button>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            placeholder="+12145551234 (optional, for pair code)"
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+          />
+          <Button
+            variant="outline"
+            onClick={() => void handleStart(true)}
+            disabled={create.isPending || start.isPending || pair.isPending}
+          >
+            {pair.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Pair by phone
+          </Button>
+        </div>
+
+        {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
       </div>
 
-      {/* QR / Pair section */}
-      {(needsStart || canConnect) && (
-        <div className="border-t bg-muted/30 px-5 py-5 space-y-5">
-          {/* QR */}
-          <div>
-            <h4 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-              <QrCode className="h-3.5 w-3.5" />
-              QR Code
-            </h4>
-            <p className="text-xs text-muted-foreground mb-2">
-              WhatsApp → Linked Devices → Link a Device
-            </p>
-            {!showQr ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowQr(true)}
-                disabled={needsStart}
-              >
-                <QrCode className="mr-1.5 h-3.5 w-3.5" />
-                {needsStart ? "Start session first" : "Show QR"}
-              </Button>
-            ) : (
-              <div className="space-y-2">
-                {qrLoading && !qrData?.qr && (
-                  <div className="flex h-48 w-48 items-center justify-center rounded-lg border bg-background">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-                {qrData?.qr && (
-                  <img
-                    src={qrData.qr}
-                    alt="WhatsApp QR"
-                    className="h-48 w-48 rounded-lg border bg-white p-2"
-                  />
-                )}
-                {qrData?.error && !qrData.qr && (
-                  <p className="text-sm text-muted-foreground">Waiting for QR code...</p>
-                )}
-                <Button size="sm" variant="outline" onClick={() => setShowQr(false)}>
-                  Hide QR
+      {activeSessionId ? (
+        <div className="rounded-xl border bg-card p-5 shadow-sm">
+          {activeSessionQuery.isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ) : activeSession ? (
+            <div>
+              <div className="mb-4 flex items-center gap-2">
+                <strong>{activeSession.id}</strong>
+                <StatusBadge status={activeSession.status} />
+                <div className="flex-1" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleLogout(activeSession.id)}
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  Logout
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleStop(activeSession.id)}
+                  disabled={isStopping}
+                >
+                  {isStopping ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                  Stop
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/whatsapp/$id/rules" params={{ id: activeSession.id }}>
+                    Rules
+                  </Link>
                 </Button>
               </div>
-            )}
-          </div>
 
-          {/* Pair code */}
-          <div>
-            <h4 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-              <Phone className="h-3.5 w-3.5" />
-              Pair with Phone
-            </h4>
-            <div className="flex gap-2 max-w-sm">
-              <Input
-                type="tel"
-                placeholder="12145551234"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-              <Button
-                size="sm"
-                disabled={pair.isPending || !phone.trim()}
-                onClick={async () => {
-                  const result = await pair.mutateAsync({ id: session.id, phone: phone.trim() });
-                  setPairCode(result.code ?? null);
-                }}
-              >
-                {pair.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Get Code"}
-              </Button>
+              {activeSessionPairCode && activeSession.status !== "connected" ? (
+                <div>
+                  <div className="rounded-lg bg-background px-4 py-6 text-center font-mono text-3xl font-semibold tracking-[0.25em] text-green-600 dark:text-green-400">
+                    {formatPairCode(activeSessionPairCode)}
+                  </div>
+                  <p className="mt-2 text-center text-sm text-muted-foreground">
+                    WhatsApp → Linked Devices → Link with phone number → enter this code
+                  </p>
+                </div>
+              ) : activeSession.status === "qr" && activeSession.hasQr ? (
+                <div className="text-center">
+                  {qrQuery.data?.qr ? (
+                    <img
+                      src={qrQuery.data.qr}
+                      alt="WhatsApp QR"
+                      className="mx-auto h-60 w-60 rounded-lg border bg-white p-2"
+                    />
+                  ) : (
+                    <div className="mx-auto flex h-60 w-60 items-center justify-center rounded-lg border bg-background">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Open WhatsApp → Linked Devices → Link a Device
+                  </p>
+                </div>
+              ) : activeSession.status === "connected" ? (
+                <p className="text-sm text-muted-foreground">✅ Linked and receiving messages.</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Status: {activeSession.status}…</p>
+              )}
             </div>
-            {pairCode && (
-              <div className="mt-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 p-3 text-center max-w-sm">
-                <p className="text-xs text-green-700 dark:text-green-400 mb-1">Enter in WhatsApp</p>
-                <p className="font-mono text-2xl font-bold tracking-[0.2em] text-green-700 dark:text-green-400">
-                  {pairCode.match(/.{1,4}/g)?.join("-")}
-                </p>
-              </div>
-            )}
-            {isPairing && !pairCode && (
-              <p className="mt-2 text-sm text-yellow-600 flex items-center gap-1.5">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Waiting for pairing code...
-              </p>
-            )}
-          </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No active session selected.</p>
+          )}
         </div>
-      )}
+      ) : null}
+
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <strong>{activeSessionId ? "Other sessions" : "All sessions"}</strong>
+          <Button variant="outline" size="sm" onClick={() => void refresh()}>
+            <RefreshCcw className="mr-2 h-3.5 w-3.5" />
+            Refresh
+          </Button>
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : isError ? (
+          <p className="text-sm text-destructive">Failed to load sessions.</p>
+        ) : !sessions?.length ? (
+          <p className="text-sm text-muted-foreground">No sessions yet.</p>
+        ) : !visibleSessions.length ? (
+          <p className="text-sm text-muted-foreground">No other sessions.</p>
+        ) : (
+          <div className="space-y-2">
+            {visibleSessions.map((session) => (
+              <div
+                key={session.id}
+                className="flex items-center justify-between border-t pt-2 first:border-t-0 first:pt-0"
+              >
+                <div className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">{session.id}</span>
+                  <StatusBadge status={session.status} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void pickSession(session.id)}>
+                    Manage
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to="/whatsapp/$id/rules" params={{ id: session.id }}>
+                      Rules
+                    </Link>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleDelete(session.id)}
+                    disabled={isDeleting === session.id}
+                  >
+                    {isDeleting === session.id ? (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

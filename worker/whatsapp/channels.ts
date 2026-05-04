@@ -46,42 +46,50 @@ export class WhatsAppParseError extends Error {
 
 export function shouldSkipWhatsAppMessage(webhook: BaileysWebhook): string | null {
   const { event, payload } = webhook;
-  if (event !== "message") return `event="${event}" (not "message")`;
-  if (!payload.from) return "missing payload.from";
-  const isText = payload.type === "chat";
-  const isMedia = !!payload.media;
-  if (!isText && !isMedia) return `type="${payload.type}" (not chat or media)`;
-  if (isText && !payload.body?.trim()) return "empty body";
+  if (event !== "message") {
+    return `event="${event}" (not "message")`;
+  }
+
+  if (!payload.from) {
+    return "missing payload.from";
+  }
+
   return null;
 }
 
 export function parseWhatsAppWebhook(body: unknown): InboundMessage {
-  if (!body || typeof body !== "object")
+  if (!body || typeof body !== "object") {
     throw new WhatsAppParseError("body must be a non-null object");
+  }
 
   const webhook = body as Record<string, unknown>;
-  if (typeof webhook.event !== "string")
+  if (typeof webhook.event !== "string") {
     throw new WhatsAppParseError('missing or invalid "event" field');
-  if (typeof webhook.session !== "string")
+  }
+  if (typeof webhook.session !== "string") {
     throw new WhatsAppParseError('missing or invalid "session" field');
-  if (!webhook.payload || typeof webhook.payload !== "object")
+  }
+  if (!webhook.payload || typeof webhook.payload !== "object") {
     throw new WhatsAppParseError('missing or invalid "payload" field');
+  }
 
   const payload = webhook.payload as Record<string, unknown>;
-  if (typeof payload.from !== "string")
+  if (typeof payload.from !== "string") {
     throw new WhatsAppParseError('missing or invalid "payload.from" field');
+  }
 
   const from = payload.from as string;
   const fromMe = Boolean(payload.fromMe);
   const bodyText = typeof payload.body === "string" ? payload.body : undefined;
-  const type = typeof payload.type === "string" ? payload.type : "";
 
   let text: string | undefined;
-  if (type === "chat" && bodyText?.trim()) {
+  if (bodyText?.trim()) {
     text = bodyText;
   } else if (payload.media && typeof payload.media === "object") {
     const rawMedia = payload.media as Record<string, unknown>;
-    if (typeof rawMedia.caption === "string") text = rawMedia.caption;
+    if (typeof rawMedia.caption === "string") {
+      text = rawMedia.caption;
+    }
   }
 
   const rawTs = payload.timestamp;
@@ -92,7 +100,9 @@ export function parseWhatsAppWebhook(body: unknown): InboundMessage {
 
 export function getWhatsAppThreadKey(webhook: BaileysWebhook): string {
   const from = webhook.payload?.from;
-  if (!from || !from.trim()) throw new Error("Missing WhatsApp payload.from for thread key");
+  if (!from || !from.trim()) {
+    throw new Error("Missing WhatsApp payload.from for thread key");
+  }
   return from;
 }
 
@@ -131,8 +141,12 @@ export function isBotMentioned(params: MentionCheckParams): boolean {
     const selfBare = bareJid(selfJid);
     const selfPhone = jidToPhone(selfJid);
     for (const jid of mentionedJids) {
-      if (bareJid(jid) === selfBare) return true;
-      if (selfPhone && jidToPhone(jid) === selfPhone) return true;
+      if (bareJid(jid) === selfBare) {
+        return true;
+      }
+      if (selfPhone && jidToPhone(jid) === selfPhone) {
+        return true;
+      }
     }
   }
 
@@ -142,22 +156,30 @@ export function isBotMentioned(params: MentionCheckParams): boolean {
     const selfPhone = jidToPhone(selfJid);
     if (selfPhone && selfPhone.length >= 10) {
       const phonePattern = new RegExp(`\\+?${selfPhone.replace(/^0+/, "")}`, "i");
-      if (phonePattern.test(cleaned.replace(/[\s-]/g, ""))) return true;
+      if (phonePattern.test(cleaned.replace(/[\s-]/g, ""))) {
+        return true;
+      }
     }
   }
 
   if (agentName && agentName.length >= 2) {
     const escaped = agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const nameRe = new RegExp(`(?:^|\\W)@?${escaped}(?:\\W|$)`, "i");
-    if (nameRe.test(cleaned)) return true;
+    if (nameRe.test(cleaned)) {
+      return true;
+    }
   }
 
   if (mentionPatterns?.length) {
     for (const pattern of mentionPatterns) {
-      if (pattern.length < 2) continue;
+      if (pattern.length < 2) {
+        continue;
+      }
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(`(?:^|\\W)@?${escaped}(?:\\W|$)`, "i");
-      if (re.test(cleaned)) return true;
+      if (re.test(cleaned)) {
+        return true;
+      }
     }
   }
 

@@ -10,7 +10,7 @@ import { dbProvider } from "../lib/dbProvider";
 import type { HonoAppType } from "../types";
 import type { WhatsAppBotProps } from "../whatsapp/agent";
 import type { BaileysWebhook } from "../whatsapp/channels";
-import { getWhatsAppThreadKey, shouldSkipWhatsAppMessage } from "../whatsapp/channels";
+import { getWhatsAppThreadKey } from "../whatsapp/channels";
 import * as gateway from "../whatsapp/gateway";
 
 const logger = getLogger([LOGGER_NAME, "whatsapp-api"]);
@@ -24,7 +24,6 @@ interface CreateWhatsAppSessionBody {
   groupPolicy?: string;
   dmPolicy?: string;
   autoReply?: boolean;
-  webhookUrl?: string;
 }
 
 interface UpdateWhatsAppSessionBody extends Partial<CreateWhatsAppSessionBody> {
@@ -66,7 +65,6 @@ function parseCreateBody(body: CreateWhatsAppSessionBody, userId: string) {
     groupPolicy: body.groupPolicy,
     dmPolicy: body.dmPolicy,
     autoReply: body.autoReply,
-    webhookUrl: body.webhookUrl,
   };
 }
 
@@ -81,7 +79,6 @@ function parseUpdateBody(body: UpdateWhatsAppSessionBody) {
     ...(body.groupPolicy !== undefined ? { groupPolicy: body.groupPolicy } : {}),
     ...(body.dmPolicy !== undefined ? { dmPolicy: body.dmPolicy } : {}),
     ...(body.autoReply !== undefined ? { autoReply: body.autoReply } : {}),
-    ...(body.webhookUrl !== undefined ? { webhookUrl: body.webhookUrl } : {}),
   };
 }
 
@@ -127,31 +124,36 @@ export const whatsappRouter = new Hono<HonoAppType>()
     }
 
     const messageBody = rawBody as BaileysWebhook;
-    const skipReason = shouldSkipWhatsAppMessage(messageBody);
-    if (skipReason) {
-      logger.debug(`[WhatsApp] Skipped: ${skipReason}`);
+    const session = await db.getWhatsAppSessionByGatewaySessionId(d1, gatewaySessionId);
+    if (!session) {
+      logger.debug(`[WhatsApp] No session for gatewaySession=${gatewaySessionId}`);
       return c.text("OK", 200);
     }
 
-    const cfg = await db.resolveWhatsAppRuntimeConfigByGatewaySessionId(d1, gatewaySessionId);
-    if (!cfg) {
-      logger.debug(`[WhatsApp] No active config for gatewaySession=${gatewaySessionId}`);
+    let chatThreadKey: string;
+    try {
+      chatThreadKey = getWhatsAppThreadKey(messageBody);
+    } catch (error) {
+      logger.debug("[WhatsApp] Webhook event has no conversation thread", {
+        event: rawBody.event,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return c.text("OK", 200);
     }
 
-    const chatThreadKey = getWhatsAppThreadKey(messageBody);
     const threadKey = `${gatewaySessionId}:${chatThreadKey}`;
     const origin = new URL(c.req.url).origin;
 
     const props: WhatsAppBotProps = {
       sessionId: gatewaySessionId,
-      agentName: cfg.session.displayName,
-      systemPrompt: cfg.systemPrompt,
-      model: cfg.model,
-      temperature: cfg.temperature,
-      maxTokens: cfg.maxTokens,
-      groupPolicy: cfg.groupPolicy as WhatsAppBotProps["groupPolicy"],
-      dmPolicy: cfg.dmPolicy as WhatsAppBotProps["dmPolicy"],
+      agentName: session.displayName,
+      systemPrompt: session.systemPrompt ?? "You are a helpful assistant.",
+      model: session.model ?? "gpt-4.1-mini",
+      temperature: session.temperature ?? 20,
+      maxTokens: session.maxTokens ?? 900,
+      groupPolicy: session.groupPolicy as WhatsAppBotProps["groupPolicy"],
+      dmPolicy: session.dmPolicy as WhatsAppBotProps["dmPolicy"],
+      autoReply: session.autoReply ?? true,
     };
 
     const doId = c.env.WhatsAppBotAgent.idFromName(threadKey);
@@ -188,7 +190,34 @@ export const whatsappRouter = new Hono<HonoAppType>()
     }
 
     const rows = await db.listWhatsAppSessionsByUserId(c.var.db, user.id);
-    return c.json({ ok: true, data: rows });
+    let gatewaySessions = new Map<string, gateway.GatewaySessionStatus>();
+
+    try {
+      const statuses = await gateway.listGatewaySessions(c.env);
+      gatewaySessions = new Map(statuses.map((session) => [session.id, session]));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("[WhatsApp] Failed to list gateway sessions", { error: message });
+    }
+
+    const data = [];
+    for (const row of rows) {
+      const gatewayStatus = gatewaySessions.get(row.gatewaySessionId);
+      const status = gatewayStatus?.status ?? row.status;
+      if (status !== row.status) {
+        await db.updateWhatsAppSession(c.var.db, row.id, { status });
+      }
+
+      data.push({
+        ...row,
+        status,
+        linked: gatewayStatus?.linked ?? false,
+        hasQr: gatewayStatus?.hasQr ?? false,
+        pairingCode: gatewayStatus?.pairingCode ?? null,
+      });
+    }
+
+    return c.json({ ok: true, data });
   })
   .post("/sessions", dbProvider, async (c) => {
     const user = c.get("user");
@@ -211,7 +240,32 @@ export const whatsappRouter = new Hono<HonoAppType>()
       throw new HTTPException(404, { message: "Not found" });
     }
 
-    return c.json({ ok: true, data: row });
+    let gatewayStatus: gateway.GatewaySessionStatus | null = null;
+    try {
+      gatewayStatus = await gateway.getGatewaySessionStatus(c.env, row.gatewaySessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("[WhatsApp] Failed to get gateway session status", {
+        error: message,
+        gatewaySessionId: row.gatewaySessionId,
+      });
+    }
+
+    const status = gatewayStatus?.status ?? row.status;
+    if (status !== row.status) {
+      await db.updateWhatsAppSession(c.var.db, row.id, { status });
+    }
+
+    return c.json({
+      ok: true,
+      data: {
+        ...row,
+        status,
+        linked: gatewayStatus?.linked ?? false,
+        hasQr: gatewayStatus?.hasQr ?? false,
+        pairingCode: gatewayStatus?.pairingCode ?? null,
+      },
+    });
   })
   .patch("/sessions/:id", dbProvider, async (c) => {
     const user = c.get("user");

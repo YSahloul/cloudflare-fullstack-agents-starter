@@ -1,19 +1,14 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { getLogger } from "@logtape/logtape";
-import type { AgentContext } from "agents";
 import { AIChatAgent } from "agents/ai-chat-agent";
 import type { StreamTextOnFinishCallback, ToolSet, UIMessage } from "ai";
 import { convertToModelMessages, streamText } from "ai";
 import { LOGGER_NAME } from "../constants";
 import { prepareErrorForLogging } from "../lib/errors";
-import type { BaileysWebhook, InboundMessage } from "./channels";
-import {
-  isBotMentioned,
-  isWhatsAppGroupJid,
-  parseWhatsAppWebhook,
-  shouldSkipWhatsAppMessage,
-} from "./channels";
+import type { BaileysWebhook } from "./channels";
+import { parseWhatsAppWebhook, shouldSkipWhatsAppMessage } from "./channels";
 import { sendWhatsAppText } from "./gateway";
+import { evaluateWhatsAppReplyRules } from "./rules";
 
 const logger = getLogger([LOGGER_NAME, "whatsapp-bot"]);
 
@@ -26,19 +21,16 @@ export interface WhatsAppBotProps {
   maxTokens?: number;
   groupPolicy?: "mention" | "always" | "disabled";
   dmPolicy?: "always" | "disabled";
+  autoReply?: boolean;
 }
 
 /**
- * One DO per conversation (per payload.from / chatId).
- * Each DO stores only that conversation's messages in its own SQLite
- * via AIChatAgent's built-in cf_ai_chat_agent_messages table.
+ * One DO per WhatsApp conversation.
+ * Webhook events are routed here by `${gatewaySessionId}:${chatJid}`.
+ * The DO captures inbound messages first, then applies reply rules.
  */
 export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
   props: WhatsAppBotProps | null = null;
-
-  constructor(ctx: AgentContext, env: CloudflareBindings) {
-    super(ctx, env);
-  }
 
   async onStart(props: Record<string, unknown>): Promise<void> {
     this.props = props as unknown as WhatsAppBotProps;
@@ -61,39 +53,40 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
 
       const skipReason = shouldSkipWhatsAppMessage(body);
       if (skipReason) {
-        logger.debug(`[WhatsApp] Skipped: ${skipReason}`);
+        logger.debug(`[WhatsApp] Captured no-op event: ${skipReason}`);
         return new Response("OK");
       }
 
       const message = parseWhatsAppWebhook(body);
       const text = message.text?.trim();
-      if (!text || message.fromMe) {
+      if (!text) {
+        logger.debug("[WhatsApp] Captured message without replyable text");
         return new Response("OK");
       }
+
+      await this.captureInboundMessage(text);
 
       if (!this.props) {
         logger.error("[WhatsApp] No props loaded for conversation DO");
         return new Response("No props — binding may be missing", { status: 500 });
       }
 
-      if (this.shouldIgnoreMessage(message)) {
+      const decision = evaluateWhatsAppReplyRules(message, {
+        agentName: this.props.agentName,
+        autoReply: this.props.autoReply,
+        groupPolicy: this.props.groupPolicy,
+        dmPolicy: this.props.dmPolicy,
+      });
+      logger.debug("[WhatsApp] Reply decision", { reason: decision.reason });
+      if (!decision.shouldReply) {
         return new Response("OK");
       }
-
-      // Build user message as UIMessage and persist
-      const userMessage: UIMessage = {
-        id: crypto.randomUUID(),
-        role: "user",
-        parts: [{ type: "text", text }],
-      };
-      this.messages.push(userMessage);
-      await this.persistMessages(this.messages);
 
       let reply = "";
       try {
         reply = await this.runInference();
-      } catch (err) {
-        logger.error("Inference error", { error: prepareErrorForLogging(err) });
+      } catch (error) {
+        logger.error("Inference error", { error: prepareErrorForLogging(error) });
         reply = "Sorry, I couldn't respond right now.";
       }
 
@@ -101,37 +94,37 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
         return new Response("OK");
       }
 
-      // Build assistant message as UIMessage and persist
-      const assistantMessage: UIMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        parts: [{ type: "text", text: reply }],
-      };
-      this.messages.push(assistantMessage);
-      await this.persistMessages(this.messages);
+      await this.captureAssistantReply(reply);
 
       try {
         await sendWhatsAppText(this.env, this.props.sessionId, message.sender, reply);
-      } catch (err) {
+      } catch (error) {
         logger.error("[WhatsApp] Failed to send reply", {
-          error: prepareErrorForLogging(err),
+          error: prepareErrorForLogging(error),
           to: message.sender,
         });
-        // Don't crash — message is already persisted; sending can retry later
       }
+
       return new Response("OK");
-    } catch (err: any) {
-      logger.error("[WhatsAppBotAgent] onRequest crashed", { error: prepareErrorForLogging(err) });
-      return new Response(
-        JSON.stringify({ error: err?.message || String(err), stack: err?.stack }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
-      );
+    } catch (error) {
+      logger.error("[WhatsAppBotAgent] onRequest crashed", {
+        error: prepareErrorForLogging(error),
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      return new Response(JSON.stringify({ error: message, stack }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   }
 
   private refreshPropsFromRequest(request: Request): void {
     const rawProps = request.headers.get("x-partykit-props");
-    if (!rawProps) return;
+    if (!rawProps) {
+      return;
+    }
+
     try {
       this.props = JSON.parse(rawProps) as WhatsAppBotProps;
     } catch (error) {
@@ -141,34 +134,30 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
     }
   }
 
-  private shouldIgnoreMessage(message: InboundMessage): boolean {
-    if (!this.props) return true;
-
-    const isGroup = this.isGroupMessage(message);
-    if (!isGroup) return this.props.dmPolicy === "disabled";
-    if (this.props.groupPolicy === "disabled") return true;
-    if (this.props.groupPolicy === "always") return false;
-
-    const body = message.text ?? "";
-    if (/^\s*\/(research|factcheck|verify)\b/i.test(body)) return false;
-
-    const raw = message.raw as BaileysWebhook;
-    return !isBotMentioned({
-      body,
-      mentionedJids: raw.payload.mentionedJids,
-      selfJid: raw.payload.selfJid,
-      agentName: this.props.agentName,
-      mentionPatterns: ["research", "research whatsapp", "fact check", "factcheck", "verify"],
-    });
+  private async captureInboundMessage(text: string): Promise<void> {
+    const userMessage: UIMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      parts: [{ type: "text", text }],
+    };
+    this.messages.push(userMessage);
+    await this.persistMessages(this.messages);
   }
 
-  private isGroupMessage(message: InboundMessage): boolean {
-    const raw = message.raw as BaileysWebhook;
-    return Boolean(raw.payload.isGroup) || isWhatsAppGroupJid(message.sender);
+  private async captureAssistantReply(reply: string): Promise<void> {
+    const assistantMessage: UIMessage = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      parts: [{ type: "text", text: reply }],
+    };
+    this.messages.push(assistantMessage);
+    await this.persistMessages(this.messages);
   }
 
   private async runInference(): Promise<string> {
-    if (!this.props) throw new Error("No props");
+    if (!this.props) {
+      throw new Error("No props");
+    }
 
     const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
     const messages = convertToModelMessages(this.messages);

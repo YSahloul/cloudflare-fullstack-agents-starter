@@ -28,6 +28,7 @@ export interface GatewaySessionStatus {
   status: string;
   linked?: boolean;
   hasQr?: boolean;
+  pairingCode?: string | null;
 }
 
 async function gatewayJson<T>(

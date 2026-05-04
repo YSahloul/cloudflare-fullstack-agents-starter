@@ -6,6 +6,9 @@ export type WhatsAppSession = {
   userId: string;
   displayName: string;
   status: string;
+  linked?: boolean;
+  hasQr?: boolean;
+  pairingCode?: string | null;
   systemPrompt: string | null;
   model: string | null;
   temperature: number | null;
@@ -13,7 +16,6 @@ export type WhatsAppSession = {
   groupPolicy: string | null;
   dmPolicy: string | null;
   autoReply: boolean | null;
-  webhookUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,6 +37,21 @@ export const listWhatsAppSessionsQueryOptions = () =>
   });
 
 export const useListWhatsAppSessionsQuery = () => useQuery(listWhatsAppSessionsQueryOptions());
+
+export function useGetWhatsAppSessionQuery(id: string) {
+  return useQuery({
+    queryKey: [WHATSAPP_KEY, "session", id],
+    queryFn: async (): Promise<WhatsAppSession> => {
+      const res = await fetch(`${API}/sessions/${id}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch session");
+      }
+      const json = await res.json();
+      return json.data;
+    },
+    enabled: !!id,
+  });
+}
 
 export function useCreateWhatsAppSessionMutation() {
   const qc = useQueryClient();
@@ -95,7 +112,6 @@ export function useGetQrQuery(id: string) {
       return json.data ?? json;
     },
     enabled: !!id,
-    refetchInterval: 3000,
   });
 }
 
@@ -121,5 +137,33 @@ export function usePairCodeMutation() {
       return json.data ?? json;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "sessions"] }),
+  });
+}
+
+export function useUpdateWhatsAppSessionMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: Partial<WhatsAppSession>;
+    }): Promise<WhatsAppSession> => {
+      const res = await fetch(`${API}/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to update session");
+      }
+      const json = await res.json();
+      return json.data;
+    },
+    onSuccess: (_data, variables) => {
+      void qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "sessions"] });
+      void qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", variables.id] });
+    },
   });
 }
