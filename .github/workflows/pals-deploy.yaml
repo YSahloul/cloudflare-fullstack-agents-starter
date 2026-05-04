@@ -14,18 +14,18 @@ on:
         required: true
       CLOUDFLARE_ACCOUNT_ID:
         required: true
-      ANTHROPIC_API_KEY:
-        required: true
-      OPENAI_API_KEY:
-        required: true
       WHATSAPP_API_KEY:
-        required: true
+        required: false
       ADMIN_API_KEY:
-        required: true
+        required: false
       BETTER_AUTH_SECRET:
-        required: true
+        required: false
       BETTER_AUTH_URL:
-        required: true
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
       GITHUB_CLIENT_ID:
         required: false
       GITHUB_CLIENT_SECRET:
@@ -100,25 +100,13 @@ jobs:
           workingDirectory: "dist/whatsapp_agents_saas"
           command: deploy --config wrangler.json
           secrets: |
-            ANTHROPIC_API_KEY
-            OPENAI_API_KEY
             WHATSAPP_API_KEY
             ADMIN_API_KEY
             BETTER_AUTH_SECRET
             BETTER_AUTH_URL
-            GITHUB_CLIENT_ID
-            GITHUB_CLIENT_SECRET
-            GOOGLE_CLIENT_ID
-            GOOGLE_CLIENT_SECRET
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WHATSAPP_API_KEY: ${{ secrets.WHATSAPP_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL }}
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           WRANGLER_LOG: "debug"
