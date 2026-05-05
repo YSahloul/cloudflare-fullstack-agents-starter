@@ -47,3 +47,6 @@ client_secret_*.json
 
 # FP snapshot directory (isolated git repo for workdir snapshots)
 .fp/snapshots/
+
+# Fiberplane local issue tracking
+.fp/
