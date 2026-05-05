@@ -296,4 +296,18 @@ bun format
 
 - Never run commands with npx in this workspace (always try to use package.json listed ones)
 
+## Agent skills
+
+### Issue tracker
+
+Issues for this repo are tracked in FP (Fiberplane) via the `fp` CLI, not GitHub Issues or local `.scratch/` files. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage state is tracked in FP using the `triage` issue property with the values `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses a single-context layout with one root `CONTEXT.md` and `docs/adr/` for architectural decisions. See `docs/agents/domain.md`.
+
 @FP_AGENTS.md
