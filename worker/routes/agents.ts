@@ -77,6 +77,10 @@ const agentsHandlers = factory.createHandlers(
       personalAgentId: personalAgent.id,
       personalAgentName: personalAgent.agentName,
       userId: user.id,
+      systemPrompt: personalAgent.systemPrompt,
+      model: personalAgent.model,
+      temperature: personalAgent.temperature,
+      maxTokens: personalAgent.maxTokens,
     });
 
     // Send the request to the agent
@@ -135,6 +139,18 @@ export const agentsRouter = new Hono<HonoAppType>()
         model,
         temperature,
         maxTokens,
+      });
+
+      const agentStubId = c.env.PersonalAgent.idFromName(personalAgent.id);
+      const agentStub = c.env.PersonalAgent.get(agentStubId);
+      await agentStub.hydrate({
+        personalAgentId: personalAgent.id,
+        personalAgentName: personalAgent.agentName,
+        userId: user.id,
+        systemPrompt: personalAgent.systemPrompt,
+        model: personalAgent.model,
+        temperature: personalAgent.temperature,
+        maxTokens: personalAgent.maxTokens,
       });
 
       return c.json(personalAgent, 201);
@@ -216,6 +232,10 @@ export const agentsRouter = new Hono<HonoAppType>()
         personalAgentId: id,
         personalAgentName: updatedPersonalAgent.agentName,
         userId: user.id,
+        systemPrompt: updatedPersonalAgent.systemPrompt,
+        model: updatedPersonalAgent.model,
+        temperature: updatedPersonalAgent.temperature,
+        maxTokens: updatedPersonalAgent.maxTokens,
       });
 
       return c.json(updatedPersonalAgent);

@@ -2,7 +2,7 @@ import { getLogger } from "@logtape/logtape";
 import { type Connection, callable, type WSMessage } from "agents";
 import { AIChatAgent } from "agents/ai-chat-agent";
 import type { StreamTextOnFinishCallback, ToolSet } from "ai";
-import { convertToModelMessages, streamText } from "ai";
+import { convertToModelMessages, stepCountIs, streamText } from "ai";
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import { CF_AGENTS_ROUTING_PREFIX, LOGGER_NAME } from "../constants";
@@ -17,6 +17,7 @@ import { isConnection } from "./utils";
 const logger = getLogger([LOGGER_NAME, "personal-agent"]);
 
 export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
+  waitForMcpConnections = true;
   db: DrizzleSqliteDODatabase<typeof schema>;
   /** The id of the record in D1 that this agent is associated with */
   personalAgentId: string | null;
@@ -24,6 +25,10 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
   personalAgentName: string | null;
   /** The user id that this agent is associated with */
   userId: string | null;
+  agentSystemPrompt: string | null;
+  agentModel: string | null;
+  agentTemperature: number | null;
+  agentMaxTokens: number | null;
 
   constructor(ctx: DurableObjectState, env: CloudflareBindings) {
     super(ctx, env);
@@ -33,21 +38,27 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
       logger: SHOULD_LOG_DRIZZLE_QUERIES ? drizzleLogger : false,
     });
 
-    // Initialize personalAgentId, personalAgentName, and userId to null here
-    // then fetch them from storage in the `blockConcurrencyWhile` block
+    // Initialize persisted metadata here, then fetch in blockConcurrencyWhile
     this.personalAgentId = null;
     this.personalAgentName = null;
     this.userId = null;
+    this.agentSystemPrompt = null;
+    this.agentModel = null;
+    this.agentTemperature = null;
+    this.agentMaxTokens = null;
 
     // Set up MCP observability listener to capture connection events
     this.observability = createObservability(logger);
     logger.debug("[MCP Observability] Observability handler configured");
 
     ctx.blockConcurrencyWhile(async () => {
-      // Initialize personalAgentId, personalAgentName, and userId to their persisted values
       this.personalAgentId = (await ctx.storage.get("personalAgentId")) ?? null;
       this.personalAgentName = (await ctx.storage.get("personalAgentName")) ?? null;
       this.userId = (await ctx.storage.get("userId")) ?? null;
+      this.agentSystemPrompt = (await ctx.storage.get("agentSystemPrompt")) ?? null;
+      this.agentModel = (await ctx.storage.get("agentModel")) ?? null;
+      this.agentTemperature = (await ctx.storage.get("agentTemperature")) ?? null;
+      this.agentMaxTokens = (await ctx.storage.get("agentMaxTokens")) ?? null;
 
       // Run drizzle migrations
       await migrate(this.db, migrations);
@@ -65,17 +76,33 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
     personalAgentId,
     personalAgentName,
     userId,
+    systemPrompt,
+    model,
+    temperature,
+    maxTokens,
   }: {
     personalAgentId: string;
     personalAgentName: string;
     userId: string;
+    systemPrompt?: string | null;
+    model?: string | null;
+    temperature?: number | null;
+    maxTokens?: number | null;
   }): Promise<void> {
     this.personalAgentId = personalAgentId;
     this.personalAgentName = personalAgentName;
     this.userId = userId;
+    this.agentSystemPrompt = systemPrompt ?? null;
+    this.agentModel = model ?? null;
+    this.agentTemperature = temperature ?? null;
+    this.agentMaxTokens = maxTokens ?? null;
     await this.ctx.storage.put("personalAgentId", personalAgentId);
     await this.ctx.storage.put("personalAgentName", personalAgentName);
     await this.ctx.storage.put("userId", userId);
+    await this.ctx.storage.put("agentSystemPrompt", this.agentSystemPrompt);
+    await this.ctx.storage.put("agentModel", this.agentModel);
+    await this.ctx.storage.put("agentTemperature", this.agentTemperature);
+    await this.ctx.storage.put("agentMaxTokens", this.agentMaxTokens);
   }
 
   async onStart(): Promise<void> {
@@ -263,36 +290,87 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
     return Object.values(serverState.servers).find((server) => server.server_url === url);
   }
 
-  async onChatMessage(
-    onFinish: StreamTextOnFinishCallback<ToolSet>,
-    options?: { abortSignal?: AbortSignal },
-  ) {
-    const model = createAiModel({
+  private createConfiguredModel() {
+    return createAiModel({
       anthropicApiKey: this.env.ANTHROPIC_API_KEY,
-      /** optional openai api key for fallback */
       openAiApiKey: this.env.OPENAI_API_KEY,
       gatewayAccountId: this.env.CLOUDFLARE_ACCOUNT_ID,
       gatewayName: getAiGatewayName(),
-      /**
-       * Record some metadata about the request in the gateway to help with searchability
-       * @note - You can have at most 5 metadata fields per request
-       */
       gatewayMetadata: {
         personalAgentName: this.personalAgentName ?? "",
         personalAgentId: this.personalAgentId ?? "",
         userId: this.userId ?? "",
       },
     });
+  }
 
-    // Convert messages to the format expected by streamText
+  private buildResearchSystemPrompt(channel: "chat" | "whatsapp"): string {
+    const basePrompt =
+      this.agentSystemPrompt?.trim() ||
+      [
+        "You are a research and fact-check agent, not a casual conversational assistant.",
+        "Your primary job is to verify claims, inspect linked posts/pages/videos when possible, and answer with evidence.",
+      ].join(" ");
+
+    const channelInstruction =
+      channel === "whatsapp"
+        ? "You are replying on WhatsApp. Keep the answer concise, mobile-friendly, and easy to skim."
+        : "Keep the answer concise and evidence-first.";
+
+    return [
+      basePrompt,
+      "If MCP scraper/search/browser tools are available, use them before making factual claims.",
+      "Prefer primary sources and reputable reporting. Do not guess or hallucinate missing facts.",
+      "When evidence is weak or incomplete, say Unverified.",
+      "Return this exact structure:",
+      "Truth meter: <True | Mostly true | Mixed | Misleading | False | Unverified>",
+      "Summary: <1-3 sentences>",
+      "Sources:",
+      "- <source title> — <URL>",
+      "- <source title> — <URL>",
+      channelInstruction,
+    ].join("\n\n");
+  }
+
+  async runResearch(query: string, channel: "chat" | "whatsapp" = "chat"): Promise<string> {
+    const model = this.createConfiguredModel();
+    const tools = this.mcp.getAITools() as unknown as ToolSet;
+
+    const result = streamText({
+      model,
+      system: this.buildResearchSystemPrompt(channel),
+      messages: [
+        {
+          role: "user",
+          content: query,
+        },
+      ],
+      tools,
+      maxOutputTokens: this.agentMaxTokens ?? 900,
+      temperature: (this.agentTemperature ?? 20) / 100,
+      stopWhen: stepCountIs(20),
+    });
+
+    return (await result.text).trim();
+  }
+
+  async onChatMessage(
+    onFinish: StreamTextOnFinishCallback<ToolSet>,
+    options?: { abortSignal?: AbortSignal },
+  ) {
+    const model = this.createConfiguredModel();
     const messages = convertToModelMessages(this.messages);
+    const tools = this.mcp.getAITools() as unknown as ToolSet;
 
-    // Use streamText from the AI SDK for generic chat
     const response = streamText({
       model,
+      system: this.buildResearchSystemPrompt("chat"),
       messages,
+      tools,
+      maxOutputTokens: this.agentMaxTokens ?? 900,
+      temperature: (this.agentTemperature ?? 20) / 100,
+      stopWhen: stepCountIs(20),
       onFinish,
-      // Pass through the abort signal, for cancellation to work properly
       abortSignal: options?.abortSignal,
     });
 

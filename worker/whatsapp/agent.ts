@@ -91,10 +91,10 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
 
       let reply = "";
       try {
-        reply = await this.runInference();
+        reply = await this.runInference(text);
       } catch (error) {
         logger.error("Inference error", { error: prepareErrorForLogging(error) });
-        reply = "Sorry, I couldn't respond right now.";
+        reply = "Sorry, I couldn't verify that right now.";
       }
 
       if (!reply) {
@@ -161,9 +161,16 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
     await this.persistMessages(this.messages);
   }
 
-  private async runInference(): Promise<string> {
+  private async runInference(userText: string): Promise<string> {
     if (!this.props) {
       throw new Error("No props");
+    }
+
+    if (this.props.agentId) {
+      const personalAgentId = this.env.PersonalAgent.idFromName(this.props.agentId);
+      const personalAgentStub = this.env.PersonalAgent.get(personalAgentId);
+      const delegatedReply = await personalAgentStub.runResearch(userText, "whatsapp");
+      return delegatedReply.trim();
     }
 
     const messages = convertToModelMessages(this.messages);
@@ -179,10 +186,18 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
   }
 
   private buildPrompt(): string {
-    const base = this.props?.systemPrompt ?? "You are a helpful assistant.";
-    return [base, "You are replying on WhatsApp. Keep answers concise and mobile-friendly."].join(
-      "\n\n",
-    );
+    const base =
+      this.props?.systemPrompt ??
+      [
+        "You are a research and fact-check agent, not a casual conversational assistant.",
+        "Verify claims carefully and answer with evidence.",
+      ].join(" ");
+
+    return [
+      base,
+      "You are replying on WhatsApp. Keep answers concise and mobile-friendly.",
+      "Return: Truth meter, Summary, Sources.",
+    ].join("\n\n");
   }
 
   private getGatewayModel() {

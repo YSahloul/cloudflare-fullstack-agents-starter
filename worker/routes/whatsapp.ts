@@ -162,8 +162,9 @@ export const whatsappRouter = new Hono<HonoAppType>()
       agentId: agentBelongsToSessionOwner ? assignedAgent.id : null,
       agentName: agentBelongsToSessionOwner ? assignedAgent.agentName : "Unassigned WhatsApp Agent",
       systemPrompt: agentBelongsToSessionOwner
-        ? (assignedAgent.systemPrompt ?? "You are a helpful assistant.")
-        : "You are a helpful assistant.",
+        ? (assignedAgent.systemPrompt ??
+          "You are a research and fact-check agent. Verify claims with evidence, return a truth meter, and cite sources.")
+        : "You are a research and fact-check agent. Verify claims with evidence, return a truth meter, and cite sources.",
       model: agentBelongsToSessionOwner ? (assignedAgent.model ?? "gpt-4.1-mini") : "gpt-4.1-mini",
       temperature: agentBelongsToSessionOwner ? (assignedAgent.temperature ?? 20) : 20,
       maxTokens: agentBelongsToSessionOwner ? (assignedAgent.maxTokens ?? 900) : 900,
