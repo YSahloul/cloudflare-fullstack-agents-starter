@@ -3,10 +3,15 @@ import { getLogger } from "@logtape/logtape";
 import { AIChatAgent } from "agents/ai-chat-agent";
 import type { StreamTextOnFinishCallback, ToolSet, UIMessage } from "ai";
 import { convertToModelMessages, streamText } from "ai";
+import { createAiGateway } from "ai-gateway-provider";
 import { LOGGER_NAME } from "../constants";
 import { prepareErrorForLogging } from "../lib/errors";
 import type { BaileysWebhook } from "./channels";
-import { parseWhatsAppWebhook, shouldSkipWhatsAppMessage } from "./channels";
+import {
+  formatWhatsAppInboundMessageForModel,
+  parseWhatsAppWebhook,
+  shouldSkipWhatsAppMessage,
+} from "./channels";
 import { sendWhatsAppText } from "./gateway";
 import { evaluateWhatsAppReplyRules } from "./rules";
 
@@ -65,7 +70,8 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
         return new Response("OK");
       }
 
-      await this.captureInboundMessage(text);
+      const formattedText = formatWhatsAppInboundMessageForModel(message);
+      await this.captureInboundMessage(formattedText);
 
       if (!this.props) {
         logger.error("[WhatsApp] No props loaded for conversation DO");
@@ -160,11 +166,9 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
       throw new Error("No props");
     }
 
-    const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
     const messages = convertToModelMessages(this.messages);
-
     const result = streamText({
-      model: openai(this.props.model),
+      model: this.getGatewayModel(),
       system: this.buildPrompt(),
       messages,
       maxOutputTokens: this.props.maxTokens ?? 900,
@@ -181,6 +185,30 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
     );
   }
 
+  private getGatewayModel() {
+    if (!this.props) {
+      throw new Error("No props");
+    }
+
+    const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
+    const aiGateway = createAiGateway({
+      accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+      gateway: this.env.CLOUDFLARE_AI_GATEWAY_ID,
+      options: {
+        skipCache: true,
+        metadata: {
+          channel: "whatsapp",
+          agentId: this.props.agentId ?? "unassigned",
+          agentName: this.props.agentName,
+          sessionId: this.props.sessionId,
+          model: this.props.model,
+        },
+      },
+    });
+
+    return aiGateway([openai(this.props.model)]);
+  }
+
   async onChatMessage(
     onFinish: StreamTextOnFinishCallback<ToolSet>,
     options?: { abortSignal?: AbortSignal },
@@ -189,11 +217,10 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
       return new Response("No agent configured", { status: 400 });
     }
 
-    const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
     const messages = convertToModelMessages(this.messages);
 
     const result = streamText({
-      model: openai(this.props.model),
+      model: this.getGatewayModel(),
       system: this.buildPrompt(),
       messages,
       onFinish,

@@ -26,10 +26,10 @@ export const personalAgents = sqliteTable("personal_agents", {
   temperature: integer("temperature").default(20),
   maxTokens: integer("max_tokens").default(900),
   archived: integer({ mode: "boolean" }).default(false).notNull(),
-  createdAt: integer({ mode: "timestamp_ms" })
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
-  updatedAt: integer({ mode: "timestamp_ms" })
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
@@ -62,10 +62,10 @@ export const whatsappSessions = sqliteTable("whatsapp_sessions", {
   dmPolicy: text("dm_policy", { length: 20 }).default("always"),
   autoReply: integer("auto_reply", { mode: "boolean" }).default(true),
   webhookUrl: text("webhook_url"),
-  createdAt: integer({ mode: "timestamp_ms" })
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
-  updatedAt: integer({ mode: "timestamp_ms" })
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),

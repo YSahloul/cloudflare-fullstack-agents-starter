@@ -37,6 +37,38 @@ export interface InboundMessage {
   raw: unknown;
 }
 
+function formatTimestamp(timestamp: number): string {
+  return new Date(timestamp).toISOString();
+}
+
+export function formatWhatsAppInboundMessageForModel(message: InboundMessage): string {
+  const raw = message.raw as BaileysWebhook;
+  const payload = raw.payload;
+  const body = message.text?.trim() ?? "";
+  const timestamp = formatTimestamp(message.timestamp);
+
+  if (payload.isGroup) {
+    return [
+      "[whatsapp group]",
+      `group: ${payload.from}`,
+      `sender: ${payload.participant ?? "unknown"}`,
+      `name: ${payload.pushName ?? "unknown"}`,
+      `timestamp: ${timestamp}`,
+      "",
+      body,
+    ].join("\n");
+  }
+
+  return [
+    "[whatsapp dm]",
+    `from: ${payload.from}`,
+    `name: ${payload.pushName ?? "unknown"}`,
+    `timestamp: ${timestamp}`,
+    "",
+    body,
+  ].join("\n");
+}
+
 export class WhatsAppParseError extends Error {
   constructor(message: string) {
     super(`[WhatsApp adapter] ${message}`);

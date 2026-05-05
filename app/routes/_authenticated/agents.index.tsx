@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
 import { Bot, Plus } from "lucide-react";
 import { PageErrorState } from "@/app/components/PageErrorState";
 import { PageLoadingState } from "@/app/components/PageLoadingState";
@@ -10,6 +11,9 @@ import {
 } from "@/app/lib/queries/personal-agents";
 
 export const Route = createFileRoute("/_authenticated/agents/")({
+  validateSearch: z.object({
+    whatsappSession: z.string().optional(),
+  }),
   loader: ({ context }) => {
     // Prefetch agents list for instant rendering
     context.queryClient.prefetchQuery(listPersonalAgentsQueryOptions());
@@ -28,6 +32,7 @@ export const Route = createFileRoute("/_authenticated/agents/")({
 });
 
 function AgentsList() {
+  const { whatsappSession } = Route.useSearch();
   const { data: agents, isLoading, isError } = useListPersonalAgentsQuery();
 
   return (
@@ -51,6 +56,13 @@ function AgentsList() {
         </h2>
         <p className="text-muted-foreground">Create and manage your personal AI agents.</p>
       </div>
+
+      {whatsappSession ? (
+        <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
+          Select an agent below to configure the paired WhatsApp session:
+          <span className="ml-1 font-medium text-foreground">{whatsappSession}</span>
+        </div>
+      ) : null}
 
       {isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -90,8 +102,9 @@ function AgentsList() {
           {agents.map((agent) => (
             <Link
               key={agent.id}
-              to="/agents/$id"
+              to={whatsappSession ? "/agents/$id/whatsapp" : "/agents/$id"}
               params={{ id: agent.id }}
+              search={whatsappSession ? { sessionId: whatsappSession } : undefined}
               className="block rounded-lg border bg-card p-4 transition-colors hover:bg-accent h-full"
             >
               <div className="flex items-start justify-between gap-4">

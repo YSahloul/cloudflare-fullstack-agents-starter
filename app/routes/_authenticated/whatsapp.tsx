@@ -77,6 +77,7 @@ function WhatsAppPage() {
   const [phone, setPhone] = useState("");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const [localPairCode, setLocalPairCode] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -140,11 +141,20 @@ function WhatsAppPage() {
     return sessions?.filter((session) => session.id !== activeSessionId) ?? [];
   }, [activeSessionId, sessions]);
 
-  async function refresh() {
+  function setCachedSessionStatus(sessionId: string, status: string) {
+    qc.setQueryData([WHATSAPP_KEY, "session", sessionId], (old: typeof activeSession) =>
+      old ? { ...old, status } : old,
+    );
+    qc.setQueryData([WHATSAPP_KEY, "sessions"], (old: typeof sessions) =>
+      old?.map((session) => (session.id === sessionId ? { ...session, status } : session)),
+    );
+  }
+
+  async function refresh(sessionId = activeSessionId) {
     await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "sessions"] });
-    if (activeSessionId) {
-      await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", activeSessionId] });
-      await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "qr", activeSessionId] });
+    if (sessionId) {
+      await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", sessionId] });
+      await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "qr", sessionId] });
     }
   }
 
@@ -163,6 +173,7 @@ function WhatsAppPage() {
     const sessionName = sid.trim();
     const cleanPhone = phone.replace(/\D/g, "");
     setError("");
+    setActionMessage("");
 
     if (!sessionName) {
       return;
@@ -179,16 +190,26 @@ function WhatsAppPage() {
       setLocalPairCode(null);
 
       if (usePair) {
+        setCachedSessionStatus(session.id, "pairing");
+        setActionMessage("Requesting pair code...");
         await fetch(`/api/whatsapp/sessions/${session.id}/logout`, { method: "POST" }).catch(
           () => null,
         );
         const result = await pair.mutateAsync({ id: session.id, phone: cleanPhone });
-        setLocalPairCode(result.code ?? null);
+        if (result.code) {
+          setLocalPairCode(result.code);
+          setCachedSessionStatus(session.id, "pairing");
+          setActionMessage("Pair code ready.");
+        } else {
+          setActionMessage(result.message ?? result.status ?? "Pair code requested.");
+        }
       } else {
+        setCachedSessionStatus(session.id, "connecting");
+        setActionMessage("Starting connection...");
         await start.mutateAsync(session.id);
       }
 
-      await refresh();
+      await refresh(session.id);
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : String(caughtError);
       setError(message);
@@ -197,9 +218,18 @@ function WhatsAppPage() {
 
   async function handleStop(sessionId: string) {
     setIsStopping(true);
+    setError("");
+    setActionMessage("Stopping...");
+    setCachedSessionStatus(sessionId, "stopped");
     try {
-      await fetch(`/api/whatsapp/sessions/${sessionId}/stop`, { method: "POST" });
-      await refresh();
+      const res = await fetch(`/api/whatsapp/sessions/${sessionId}/stop`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error("Failed to stop session");
+      }
+      setActionMessage("Stopped.");
+      await refresh(sessionId);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
     } finally {
       setIsStopping(false);
     }
@@ -207,10 +237,19 @@ function WhatsAppPage() {
 
   async function handleLogout(sessionId: string) {
     setIsLoggingOut(true);
+    setError("");
+    setActionMessage("Logging out...");
+    setCachedSessionStatus(sessionId, "logged_out");
     try {
-      await fetch(`/api/whatsapp/sessions/${sessionId}/logout`, { method: "POST" });
+      const res = await fetch(`/api/whatsapp/sessions/${sessionId}/logout`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error("Failed to logout session");
+      }
       setLocalPairCode(null);
-      await refresh();
+      setActionMessage("Logged out.");
+      await refresh(sessionId);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
     } finally {
       setIsLoggingOut(false);
     }
@@ -222,13 +261,21 @@ function WhatsAppPage() {
     }
 
     setIsDeleting(sessionId);
+    setError("");
+    setActionMessage("Deleting...");
     try {
-      await fetch(`/api/whatsapp/sessions/${sessionId}`, { method: "DELETE" });
+      const res = await fetch(`/api/whatsapp/sessions/${sessionId}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error("Failed to delete session");
+      }
       if (activeSessionId === sessionId) {
         setActiveSessionId(null);
         setLocalPairCode(null);
       }
+      setActionMessage("Deleted.");
       await refresh();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
     } finally {
       setIsDeleting(null);
     }
@@ -283,11 +330,18 @@ function WhatsAppPage() {
           </Button>
         </div>
 
+        {actionMessage ? (
+          <p className="mt-3 text-sm text-muted-foreground">{actionMessage}</p>
+        ) : null}
         {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
       </div>
 
       {activeSessionId ? (
         <div className="rounded-xl border bg-card p-5 shadow-sm">
+          {actionMessage ? (
+            <p className="mb-3 text-sm text-muted-foreground">{actionMessage}</p>
+          ) : null}
+          {error ? <p className="mb-3 text-sm text-destructive">{error}</p> : null}
           {activeSessionQuery.isLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-6 w-40" />
@@ -318,8 +372,8 @@ function WhatsAppPage() {
                   Stop
                 </Button>
                 <Button size="sm" asChild>
-                  <a href={`/whatsapp/${encodeURIComponent(activeSession.id)}/rules`}>
-                    Agent & Rules
+                  <a href={`/agents?whatsappSession=${encodeURIComponent(activeSession.id)}`}>
+                    Configure in Agents
                   </a>
                 </Button>
               </div>
@@ -399,7 +453,9 @@ function WhatsAppPage() {
                     Manage
                   </Button>
                   <Button size="sm" asChild>
-                    <a href={`/whatsapp/${encodeURIComponent(session.id)}/rules`}>Agent & Rules</a>
+                    <a href={`/agents?whatsappSession=${encodeURIComponent(session.id)}`}>
+                      Configure in Agents
+                    </a>
                   </Button>
                   <Button
                     variant="outline"

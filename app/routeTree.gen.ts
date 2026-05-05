@@ -25,6 +25,7 @@ import { Route as AuthenticatedAgentsIdIndexRouteImport } from './routes/_authen
 import { Route as OauthLayoutPersonalAgentsAuthSuccessRouteImport } from './routes/_oauthLayout.personal-agents.auth.success'
 import { Route as OauthLayoutPersonalAgentsAuthErrorRouteImport } from './routes/_oauthLayout.personal-agents.auth.error'
 import { Route as AuthenticatedWhatsappIdRulesRouteImport } from './routes/_authenticated/whatsapp.$id.rules'
+import { Route as AuthenticatedAgentsIdWhatsappRouteImport } from './routes/_authenticated/agents.$id.whatsapp'
 
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
@@ -109,6 +110,12 @@ const AuthenticatedWhatsappIdRulesRoute =
     path: '/rules',
     getParentRoute: () => AuthenticatedWhatsappIdRoute,
   } as any)
+const AuthenticatedAgentsIdWhatsappRoute =
+  AuthenticatedAgentsIdWhatsappRouteImport.update({
+    id: '/whatsapp',
+    path: '/whatsapp',
+    getParentRoute: () => AuthenticatedAgentsIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
   '/agents/new': typeof AuthenticatedAgentsNewRoute
   '/whatsapp/$id': typeof AuthenticatedWhatsappIdRouteWithChildren
   '/agents': typeof AuthenticatedAgentsIndexRoute
+  '/agents/$id/whatsapp': typeof AuthenticatedAgentsIdWhatsappRoute
   '/whatsapp/$id/rules': typeof AuthenticatedWhatsappIdRulesRoute
   '/personal-agents/auth/error': typeof OauthLayoutPersonalAgentsAuthErrorRoute
   '/personal-agents/auth/success': typeof OauthLayoutPersonalAgentsAuthSuccessRoute
@@ -136,6 +144,7 @@ export interface FileRoutesByTo {
   '/agents/new': typeof AuthenticatedAgentsNewRoute
   '/whatsapp/$id': typeof AuthenticatedWhatsappIdRouteWithChildren
   '/agents': typeof AuthenticatedAgentsIndexRoute
+  '/agents/$id/whatsapp': typeof AuthenticatedAgentsIdWhatsappRoute
   '/whatsapp/$id/rules': typeof AuthenticatedWhatsappIdRulesRoute
   '/personal-agents/auth/error': typeof OauthLayoutPersonalAgentsAuthErrorRoute
   '/personal-agents/auth/success': typeof OauthLayoutPersonalAgentsAuthSuccessRoute
@@ -155,6 +164,7 @@ export interface FileRoutesById {
   '/_authenticated/agents/new': typeof AuthenticatedAgentsNewRoute
   '/_authenticated/whatsapp/$id': typeof AuthenticatedWhatsappIdRouteWithChildren
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
+  '/_authenticated/agents/$id/whatsapp': typeof AuthenticatedAgentsIdWhatsappRoute
   '/_authenticated/whatsapp/$id/rules': typeof AuthenticatedWhatsappIdRulesRoute
   '/_oauthLayout/personal-agents/auth/error': typeof OauthLayoutPersonalAgentsAuthErrorRoute
   '/_oauthLayout/personal-agents/auth/success': typeof OauthLayoutPersonalAgentsAuthSuccessRoute
@@ -173,6 +183,7 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/whatsapp/$id'
     | '/agents'
+    | '/agents/$id/whatsapp'
     | '/whatsapp/$id/rules'
     | '/personal-agents/auth/error'
     | '/personal-agents/auth/success'
@@ -188,6 +199,7 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/whatsapp/$id'
     | '/agents'
+    | '/agents/$id/whatsapp'
     | '/whatsapp/$id/rules'
     | '/personal-agents/auth/error'
     | '/personal-agents/auth/success'
@@ -206,6 +218,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agents/new'
     | '/_authenticated/whatsapp/$id'
     | '/_authenticated/agents/'
+    | '/_authenticated/agents/$id/whatsapp'
     | '/_authenticated/whatsapp/$id/rules'
     | '/_oauthLayout/personal-agents/auth/error'
     | '/_oauthLayout/personal-agents/auth/success'
@@ -333,6 +346,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedWhatsappIdRulesRouteImport
       parentRoute: typeof AuthenticatedWhatsappIdRoute
     }
+    '/_authenticated/agents/$id/whatsapp': {
+      id: '/_authenticated/agents/$id/whatsapp'
+      path: '/whatsapp'
+      fullPath: '/agents/$id/whatsapp'
+      preLoaderRoute: typeof AuthenticatedAgentsIdWhatsappRouteImport
+      parentRoute: typeof AuthenticatedAgentsIdRoute
+    }
   }
 }
 
@@ -364,10 +384,12 @@ const AuthenticatedWhatsappRouteWithChildren =
   )
 
 interface AuthenticatedAgentsIdRouteChildren {
+  AuthenticatedAgentsIdWhatsappRoute: typeof AuthenticatedAgentsIdWhatsappRoute
   AuthenticatedAgentsIdIndexRoute: typeof AuthenticatedAgentsIdIndexRoute
 }
 
 const AuthenticatedAgentsIdRouteChildren: AuthenticatedAgentsIdRouteChildren = {
+  AuthenticatedAgentsIdWhatsappRoute: AuthenticatedAgentsIdWhatsappRoute,
   AuthenticatedAgentsIdIndexRoute: AuthenticatedAgentsIdIndexRoute,
 }
 

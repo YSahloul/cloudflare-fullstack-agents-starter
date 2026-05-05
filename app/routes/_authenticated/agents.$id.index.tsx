@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useAgentChat } from "agents/ai-react";
-import { ArrowLeft, Bot, Loader2, Pencil, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, Bot, Loader2, MessageSquareText, Pencil, Send, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Markdown } from "@/app/components/Markdown";
 import { Button } from "@/app/components/ui/button";
@@ -167,18 +167,26 @@ function AgentDetails() {
             </div>
           )}
         </div>
-        <Button
-          variant="destructive"
-          size="icon"
-          onClick={handleDelete}
-          disabled={deleteAgentMutation.isPending}
-        >
-          {deleteAgentMutation.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/agents/$id/whatsapp" params={{ id }}>
+              <MessageSquareText className="h-4 w-4" />
+              WhatsApp
+            </Link>
+          </Button>
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={handleDelete}
+            disabled={deleteAgentMutation.isPending}
+          >
+            {deleteAgentMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Chat Interface */}
