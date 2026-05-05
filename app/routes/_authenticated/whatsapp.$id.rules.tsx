@@ -6,6 +6,7 @@ import { PageLoadingState } from "@/app/components/PageLoadingState";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import {
+  useCreatePersonalAgentMutation,
   useListPersonalAgentsQuery,
   useUpdatePersonalAgentMutation,
 } from "@/app/lib/queries/personal-agents";
@@ -34,9 +35,11 @@ function WhatsAppRulesPage() {
   const agentsQuery = useListPersonalAgentsQuery();
   const updateSession = useUpdateWhatsAppSessionMutation();
   const updateAgent = useUpdatePersonalAgentMutation();
+  const createAgent = useCreatePersonalAgentMutation();
   const session = sessionQuery.data;
   const agents = agentsQuery.data ?? [];
   const [message, setMessage] = useState("");
+  const [newAgentName, setNewAgentName] = useState("WhatsApp Assistant");
   const [rules, setRules] = useState({
     agentId: "",
     autoReply: true,
@@ -90,6 +93,24 @@ function WhatsAppRulesPage() {
       maxTokens: String(selectedAgent.maxTokens ?? 900),
     });
   }, [selectedAgent]);
+
+  async function handleCreateAgent() {
+    const agentName = newAgentName.trim();
+    if (!agentName) {
+      setMessage("Agent name is required.");
+      return;
+    }
+
+    setMessage("");
+
+    try {
+      const agent = await createAgent.mutateAsync({ agentName });
+      setRules((current) => ({ ...current, agentId: agent.id }));
+      setMessage("Agent created. Save to assign it to this WhatsApp session.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   async function handleSave() {
     if (!session) {
@@ -157,25 +178,44 @@ function WhatsAppRulesPage() {
       </div>
 
       <div className="space-y-5 rounded-xl border bg-card p-5 shadow-sm">
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="agentId">
-            Agent
-          </label>
-          <select
-            id="agentId"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            value={rules.agentId}
-            onChange={(event) =>
-              setRules((current) => ({ ...current, agentId: event.target.value }))
-            }
-          >
-            <option value="">No agent assigned</option>
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.agentName}
-              </option>
-            ))}
-          </select>
+        <div className="space-y-3 rounded-lg border bg-background p-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="agentId">
+              Assigned agent
+            </label>
+            <select
+              id="agentId"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={rules.agentId}
+              onChange={(event) =>
+                setRules((current) => ({ ...current, agentId: event.target.value }))
+              }
+            >
+              <option value="">No agent assigned - capture only</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.agentName}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              value={newAgentName}
+              onChange={(event) => setNewAgentName(event.target.value)}
+              placeholder="New agent name"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleCreateAgent()}
+              disabled={createAgent.isPending}
+            >
+              {createAgent.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Create agent
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -310,7 +350,7 @@ function WhatsAppRulesPage() {
         <div className="flex items-center gap-3">
           <Button
             onClick={() => void handleSave()}
-            disabled={updateSession.isPending || updateAgent.isPending}
+            disabled={updateSession.isPending || updateAgent.isPending || createAgent.isPending}
           >
             {updateSession.isPending || updateAgent.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

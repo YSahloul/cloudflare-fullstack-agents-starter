@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Loader2, MessageSquare, RefreshCcw, Smartphone } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PageErrorState } from "@/app/components/PageErrorState";
@@ -317,10 +317,10 @@ function WhatsAppPage() {
                   {isStopping ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
                   Stop
                 </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to="/whatsapp/$id/rules" params={{ id: activeSession.id }}>
-                    Rules
-                  </Link>
+                <Button size="sm" asChild>
+                  <a href={`/whatsapp/${encodeURIComponent(activeSession.id)}/rules`}>
+                    Agent & Rules
+                  </a>
                 </Button>
               </div>
 
@@ -398,10 +398,8 @@ function WhatsAppPage() {
                   <Button variant="outline" size="sm" onClick={() => void pickSession(session.id)}>
                     Manage
                   </Button>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link to="/whatsapp/$id/rules" params={{ id: session.id }}>
-                      Rules
-                    </Link>
+                  <Button size="sm" asChild>
+                    <a href={`/whatsapp/${encodeURIComponent(session.id)}/rules`}>Agent & Rules</a>
                   </Button>
                   <Button
                     variant="outline"

@@ -1,4 +1,9 @@
-export interface PairCodeRequest {
+export interface GatewayWebhookConfig {
+  webhookUrl: string;
+  webhookApiKey?: string;
+}
+
+export interface PairCodeRequest extends Partial<GatewayWebhookConfig> {
   phone: string;
 }
 
@@ -52,10 +57,11 @@ async function gatewayJson<T>(
 export async function startGatewaySession(
   env: { WHATSAPP: Fetcher },
   sessionId: string,
+  webhookConfig: GatewayWebhookConfig,
 ): Promise<GatewaySessionStatus> {
   return gatewayJson<GatewaySessionStatus>(env, "/api/sessions", {
     method: "POST",
-    body: { name: sessionId },
+    body: { name: sessionId, ...webhookConfig },
   });
 }
 

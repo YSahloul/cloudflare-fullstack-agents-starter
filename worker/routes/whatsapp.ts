@@ -86,6 +86,13 @@ function parseUpdateBody(body: UpdateWhatsAppSessionBody) {
   };
 }
 
+function getAppWebhookConfig(c: { req: { url: string }; env: { WHATSAPP_API_KEY?: string } }) {
+  return {
+    webhookUrl: `${new URL(c.req.url).origin}/api/whatsapp/webhook`,
+    webhookApiKey: c.env.WHATSAPP_API_KEY,
+  };
+}
+
 function getWebhookStatus(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -289,7 +296,11 @@ export const whatsappRouter = new Hono<HonoAppType>()
       throw new HTTPException(404, { message: "Not found" });
     }
 
-    const status = await gateway.startGatewaySession(c.env, existing.gatewaySessionId);
+    const status = await gateway.startGatewaySession(
+      c.env,
+      existing.gatewaySessionId,
+      getAppWebhookConfig(c),
+    );
     await db.updateWhatsAppSession(c.var.db, existing.id, {
       status: status.status ?? "connecting",
     });
@@ -332,6 +343,7 @@ export const whatsappRouter = new Hono<HonoAppType>()
 
     const result = await gateway.requestGatewayPairCode(c.env, existing.gatewaySessionId, {
       phone: body.phone,
+      ...getAppWebhookConfig(c),
     });
     await db.updateWhatsAppSession(c.var.db, existing.id, { status: result.status ?? "pairing" });
     return c.json({ ok: true, data: result });
