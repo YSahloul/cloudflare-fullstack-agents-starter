@@ -17,6 +17,10 @@ export async function createPersonalAgent(
   data: {
     userId: string;
     agentName: string;
+    systemPrompt?: string | null;
+    model?: string | null;
+    temperature?: number | null;
+    maxTokens?: number | null;
   },
 ) {
   const id = nanoid();
@@ -26,6 +30,10 @@ export async function createPersonalAgent(
       id,
       userId: data.userId,
       agentName: data.agentName,
+      systemPrompt: data.systemPrompt,
+      model: data.model,
+      temperature: data.temperature,
+      maxTokens: data.maxTokens,
     })
     .returning();
 
@@ -50,6 +58,10 @@ export async function updatePersonalAgent(
   id: string,
   data: {
     agentName?: string;
+    systemPrompt?: string | null;
+    model?: string | null;
+    temperature?: number | null;
+    maxTokens?: number | null;
   },
 ) {
   const [personalAgent] = await db

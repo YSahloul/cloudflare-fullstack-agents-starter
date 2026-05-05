@@ -21,6 +21,10 @@ export const personalAgents = sqliteTable("personal_agents", {
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
   agentName: text("agent_name").notNull(),
+  systemPrompt: text("system_prompt"),
+  model: text("model").default("gpt-4.1-mini"),
+  temperature: integer("temperature").default(20),
+  maxTokens: integer("max_tokens").default(900),
   archived: integer({ mode: "boolean" }).default(false).notNull(),
   createdAt: integer({ mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -48,6 +52,7 @@ export const whatsappSessions = sqliteTable("whatsapp_sessions", {
     .references(() => usersTable.id, { onDelete: "cascade" }),
   displayName: text("display_name").notNull(),
   status: text("status", { length: 20 }).notNull().default("disconnected"),
+  agentId: text("agent_id").references(() => personalAgents.id, { onDelete: "set null" }),
   // AI config stored directly on the session
   systemPrompt: text("system_prompt"),
   model: text("model").default("gpt-4.1-mini"),

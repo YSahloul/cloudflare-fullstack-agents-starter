@@ -6,6 +6,7 @@ export type WhatsAppSession = {
   userId: string;
   displayName: string;
   status: string;
+  agentId: string | null;
   linked?: boolean;
   hasQr?: boolean;
   pairingCode?: string | null;

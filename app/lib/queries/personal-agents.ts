@@ -4,6 +4,10 @@ export type PersonalAgent = {
   id: string;
   userId: string;
   agentName: string;
+  systemPrompt: string | null;
+  model: string | null;
+  temperature: number | null;
+  maxTokens: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -92,6 +96,10 @@ export function useCreatePersonalAgentMutation() {
         id: `temp-${Date.now()}`,
         userId: "",
         agentName: newAgentData.agentName,
+        systemPrompt: null,
+        model: "gpt-4.1-mini",
+        temperature: 20,
+        maxTokens: 900,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -126,11 +134,20 @@ export function useCreatePersonalAgentMutation() {
   });
 }
 
+export type UpdatePersonalAgentInput = {
+  id: string;
+  agentName: string;
+  systemPrompt?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  maxTokens?: number | null;
+};
+
 export function useUpdatePersonalAgentMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { id: string; agentName: string }): Promise<PersonalAgent> => {
+    mutationFn: async (data: UpdatePersonalAgentInput): Promise<PersonalAgent> => {
       const response = await fetch(`/api/v1/agents/personal-agents/${data.id}`, {
         method: "PATCH",
         headers: {
@@ -138,6 +155,10 @@ export function useUpdatePersonalAgentMutation() {
         },
         body: JSON.stringify({
           agentName: data.agentName,
+          systemPrompt: data.systemPrompt,
+          model: data.model,
+          temperature: data.temperature,
+          maxTokens: data.maxTokens,
         }),
       });
 
@@ -167,9 +188,7 @@ export function useUpdatePersonalAgentMutation() {
       // Optimistically update in list
       queryClient.setQueryData<PersonalAgent[]>([PERSONAL_AGENTS_KEY], (old = []) =>
         old.map((agent) =>
-          agent.id === updatedData.id
-            ? { ...agent, agentName: updatedData.agentName, updatedAt: Date.now() }
-            : agent,
+          agent.id === updatedData.id ? { ...agent, ...updatedData, updatedAt: Date.now() } : agent,
         ),
       );
 
@@ -177,7 +196,7 @@ export function useUpdatePersonalAgentMutation() {
       if (previousAgent) {
         queryClient.setQueryData<PersonalAgent>([PERSONAL_AGENTS_KEY, updatedData.id], {
           ...previousAgent,
-          agentName: updatedData.agentName,
+          ...updatedData,
           updatedAt: Date.now(),
         });
       }

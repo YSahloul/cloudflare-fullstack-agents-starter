@@ -1,10 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Loader2, MessageSquareText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageErrorState } from "@/app/components/PageErrorState";
 import { PageLoadingState } from "@/app/components/PageLoadingState";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
+import {
+  useListPersonalAgentsQuery,
+  useUpdatePersonalAgentMutation,
+} from "@/app/lib/queries/personal-agents";
 import {
   useGetWhatsAppSessionQuery,
   useUpdateWhatsAppSessionMutation,
@@ -27,18 +31,30 @@ export const Route = createFileRoute("/_authenticated/whatsapp/$id/rules")({
 function WhatsAppRulesPage() {
   const { id } = Route.useParams();
   const sessionQuery = useGetWhatsAppSessionQuery(id);
+  const agentsQuery = useListPersonalAgentsQuery();
   const updateSession = useUpdateWhatsAppSessionMutation();
+  const updateAgent = useUpdatePersonalAgentMutation();
   const session = sessionQuery.data;
+  const agents = agentsQuery.data ?? [];
   const [message, setMessage] = useState("");
   const [rules, setRules] = useState({
+    agentId: "",
     autoReply: true,
     dmPolicy: "always",
     groupPolicy: "mention",
+  });
+  const [agentConfig, setAgentConfig] = useState({
+    agentName: "",
     systemPrompt: "",
     model: "gpt-4.1-mini",
     temperature: "20",
     maxTokens: "900",
   });
+
+  const selectedAgent = useMemo(
+    () => agents.find((agent) => agent.id === rules.agentId) ?? null,
+    [agents, rules.agentId],
+  );
 
   useEffect(() => {
     if (!session) {
@@ -46,16 +62,34 @@ function WhatsAppRulesPage() {
     }
 
     setRules({
+      agentId: session.agentId ?? "",
       autoReply: session.autoReply ?? true,
       dmPolicy: session.dmPolicy ?? "always",
       groupPolicy: session.groupPolicy ?? "mention",
-      systemPrompt: session.systemPrompt ?? "",
-      model: session.model ?? "gpt-4.1-mini",
-      temperature: String(session.temperature ?? 20),
-      maxTokens: String(session.maxTokens ?? 900),
     });
     setMessage("");
   }, [session]);
+
+  useEffect(() => {
+    if (!selectedAgent) {
+      setAgentConfig({
+        agentName: "",
+        systemPrompt: "",
+        model: "gpt-4.1-mini",
+        temperature: "20",
+        maxTokens: "900",
+      });
+      return;
+    }
+
+    setAgentConfig({
+      agentName: selectedAgent.agentName,
+      systemPrompt: selectedAgent.systemPrompt ?? "",
+      model: selectedAgent.model ?? "gpt-4.1-mini",
+      temperature: String(selectedAgent.temperature ?? 20),
+      maxTokens: String(selectedAgent.maxTokens ?? 900),
+    });
+  }, [selectedAgent]);
 
   async function handleSave() {
     if (!session) {
@@ -68,22 +102,31 @@ function WhatsAppRulesPage() {
       await updateSession.mutateAsync({
         id: session.id,
         data: {
+          agentId: rules.agentId || null,
           autoReply: rules.autoReply,
           dmPolicy: rules.dmPolicy,
           groupPolicy: rules.groupPolicy,
-          systemPrompt: rules.systemPrompt || null,
-          model: rules.model,
-          temperature: Number(rules.temperature),
-          maxTokens: Number(rules.maxTokens),
         },
       });
+
+      if (selectedAgent) {
+        await updateAgent.mutateAsync({
+          id: selectedAgent.id,
+          agentName: agentConfig.agentName,
+          systemPrompt: agentConfig.systemPrompt || null,
+          model: agentConfig.model,
+          temperature: Number(agentConfig.temperature),
+          maxTokens: Number(agentConfig.maxTokens),
+        });
+      }
+
       setMessage("Saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   }
 
-  if (sessionQuery.isLoading) {
+  if (sessionQuery.isLoading || agentsQuery.isLoading) {
     return <PageLoadingState message="Loading WhatsApp rules..." />;
   }
 
@@ -104,7 +147,7 @@ function WhatsAppRulesPage() {
         <div className="flex items-center gap-3">
           <MessageSquareText className="h-7 w-7 text-primary" />
           <div>
-            <h1 className="text-2xl font-semibold">WhatsApp bot rules</h1>
+            <h1 className="text-2xl font-semibold">WhatsApp agent assignment</h1>
             <p className="text-sm text-muted-foreground">Session: {session.id}</p>
           </div>
         </div>
@@ -113,19 +156,44 @@ function WhatsAppRulesPage() {
         </Button>
       </div>
 
-      <div className="rounded-xl border bg-card p-5 shadow-sm space-y-5">
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
-            checked={rules.autoReply}
+      <div className="space-y-5 rounded-xl border bg-card p-5 shadow-sm">
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor="agentId">
+            Agent
+          </label>
+          <select
+            id="agentId"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            value={rules.agentId}
             onChange={(event) =>
-              setRules((current) => ({ ...current, autoReply: event.target.checked }))
+              setRules((current) => ({ ...current, agentId: event.target.value }))
             }
-          />
-          Auto-reply
-        </label>
+          >
+            <option value="">No agent assigned</option>
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.agentName}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={rules.autoReply}
+              onChange={(event) =>
+                setRules((current) => ({ ...current, autoReply: event.target.checked }))
+              }
+            />
+            Auto-reply
+          </label>
+
+          <div className="text-sm text-muted-foreground">
+            No assigned agent means capture only, no replies.
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-medium" htmlFor="dmPolicy">
               DM policy
@@ -162,75 +230,92 @@ function WhatsAppRulesPage() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="systemPrompt">
-            System prompt
-          </label>
-          <textarea
-            id="systemPrompt"
-            className="min-h-36 w-full rounded-md border bg-background px-3 py-2 text-sm"
-            value={rules.systemPrompt}
-            onChange={(event) =>
-              setRules((current) => ({ ...current, systemPrompt: event.target.value }))
-            }
-          />
-        </div>
+        {selectedAgent ? (
+          <div className="space-y-4 border-t pt-5">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="agentName">
+                Agent name
+              </label>
+              <Input
+                id="agentName"
+                value={agentConfig.agentName}
+                onChange={(event) =>
+                  setAgentConfig((current) => ({ ...current, agentName: event.target.value }))
+                }
+              />
+            </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="model">
-              Model
-            </label>
-            <Input
-              id="model"
-              value={rules.model}
-              onChange={(event) =>
-                setRules((current) => ({ ...current, model: event.target.value }))
-              }
-            />
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="systemPrompt">
+                System prompt
+              </label>
+              <textarea
+                id="systemPrompt"
+                className="min-h-36 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={agentConfig.systemPrompt}
+                onChange={(event) =>
+                  setAgentConfig((current) => ({ ...current, systemPrompt: event.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="model">
+                  Model
+                </label>
+                <Input
+                  id="model"
+                  value={agentConfig.model}
+                  onChange={(event) =>
+                    setAgentConfig((current) => ({ ...current, model: event.target.value }))
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="temperature">
+                  Temperature
+                </label>
+                <Input
+                  id="temperature"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={agentConfig.temperature}
+                  onChange={(event) =>
+                    setAgentConfig((current) => ({ ...current, temperature: event.target.value }))
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="maxTokens">
+                  Max tokens
+                </label>
+                <Input
+                  id="maxTokens"
+                  type="number"
+                  min="1"
+                  value={agentConfig.maxTokens}
+                  onChange={(event) =>
+                    setAgentConfig((current) => ({ ...current, maxTokens: event.target.value }))
+                  }
+                />
+              </div>
+            </div>
           </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="temperature">
-              Temperature
-            </label>
-            <Input
-              id="temperature"
-              type="number"
-              min="0"
-              max="100"
-              value={rules.temperature}
-              onChange={(event) =>
-                setRules((current) => ({ ...current, temperature: event.target.value }))
-              }
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="maxTokens">
-              Max tokens
-            </label>
-            <Input
-              id="maxTokens"
-              type="number"
-              min="1"
-              value={rules.maxTokens}
-              onChange={(event) =>
-                setRules((current) => ({ ...current, maxTokens: event.target.value }))
-              }
-            />
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-          Webhooks are always captured into the conversation Durable Object first. These rules only
-          decide whether the bot replies after capture.
-        </div>
+        ) : null}
 
         <div className="flex items-center gap-3">
-          <Button onClick={() => void handleSave()} disabled={updateSession.isPending}>
-            {updateSession.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Save rules
+          <Button
+            onClick={() => void handleSave()}
+            disabled={updateSession.isPending || updateAgent.isPending}
+          >
+            {updateSession.isPending || updateAgent.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            Save
           </Button>
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
         </div>

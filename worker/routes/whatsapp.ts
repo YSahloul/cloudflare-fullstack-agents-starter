@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { nanoid } from "nanoid";
 import { LOGGER_NAME } from "../constants";
+import { getPersonalAgentById } from "../db/queries/personal-agents";
 import * as db from "../db/queries/whatsapp";
 import * as schema from "../db/schema";
 import { dbProvider } from "../lib/dbProvider";
@@ -24,6 +25,7 @@ interface CreateWhatsAppSessionBody {
   groupPolicy?: string;
   dmPolicy?: string;
   autoReply?: boolean;
+  agentId?: string | null;
 }
 
 interface UpdateWhatsAppSessionBody extends Partial<CreateWhatsAppSessionBody> {
@@ -65,6 +67,7 @@ function parseCreateBody(body: CreateWhatsAppSessionBody, userId: string) {
     groupPolicy: body.groupPolicy,
     dmPolicy: body.dmPolicy,
     autoReply: body.autoReply,
+    agentId: body.agentId,
   };
 }
 
@@ -79,6 +82,7 @@ function parseUpdateBody(body: UpdateWhatsAppSessionBody) {
     ...(body.groupPolicy !== undefined ? { groupPolicy: body.groupPolicy } : {}),
     ...(body.dmPolicy !== undefined ? { dmPolicy: body.dmPolicy } : {}),
     ...(body.autoReply !== undefined ? { autoReply: body.autoReply } : {}),
+    ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
   };
 }
 
@@ -141,19 +145,24 @@ export const whatsappRouter = new Hono<HonoAppType>()
       return c.text("OK", 200);
     }
 
+    const assignedAgent = session.agentId ? await getPersonalAgentById(d1, session.agentId) : null;
+    const agentBelongsToSessionOwner = assignedAgent?.userId === session.userId;
     const threadKey = `${gatewaySessionId}:${chatThreadKey}`;
     const origin = new URL(c.req.url).origin;
 
     const props: WhatsAppBotProps = {
       sessionId: gatewaySessionId,
-      agentName: session.displayName,
-      systemPrompt: session.systemPrompt ?? "You are a helpful assistant.",
-      model: session.model ?? "gpt-4.1-mini",
-      temperature: session.temperature ?? 20,
-      maxTokens: session.maxTokens ?? 900,
+      agentId: agentBelongsToSessionOwner ? assignedAgent.id : null,
+      agentName: agentBelongsToSessionOwner ? assignedAgent.agentName : "Unassigned WhatsApp Agent",
+      systemPrompt: agentBelongsToSessionOwner
+        ? (assignedAgent.systemPrompt ?? "You are a helpful assistant.")
+        : "You are a helpful assistant.",
+      model: agentBelongsToSessionOwner ? (assignedAgent.model ?? "gpt-4.1-mini") : "gpt-4.1-mini",
+      temperature: agentBelongsToSessionOwner ? (assignedAgent.temperature ?? 20) : 20,
+      maxTokens: agentBelongsToSessionOwner ? (assignedAgent.maxTokens ?? 900) : 900,
       groupPolicy: session.groupPolicy as WhatsAppBotProps["groupPolicy"],
       dmPolicy: session.dmPolicy as WhatsAppBotProps["dmPolicy"],
-      autoReply: session.autoReply ?? true,
+      autoReply: agentBelongsToSessionOwner ? (session.autoReply ?? true) : false,
     };
 
     const doId = c.env.WhatsAppBotAgent.idFromName(threadKey);
@@ -190,32 +199,12 @@ export const whatsappRouter = new Hono<HonoAppType>()
     }
 
     const rows = await db.listWhatsAppSessionsByUserId(c.var.db, user.id);
-    let gatewaySessions = new Map<string, gateway.GatewaySessionStatus>();
-
-    try {
-      const statuses = await gateway.listGatewaySessions(c.env);
-      gatewaySessions = new Map(statuses.map((session) => [session.id, session]));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn("[WhatsApp] Failed to list gateway sessions", { error: message });
-    }
-
-    const data = [];
-    for (const row of rows) {
-      const gatewayStatus = gatewaySessions.get(row.gatewaySessionId);
-      const status = gatewayStatus?.status ?? row.status;
-      if (status !== row.status) {
-        await db.updateWhatsAppSession(c.var.db, row.id, { status });
-      }
-
-      data.push({
-        ...row,
-        status,
-        linked: gatewayStatus?.linked ?? false,
-        hasQr: gatewayStatus?.hasQr ?? false,
-        pairingCode: gatewayStatus?.pairingCode ?? null,
-      });
-    }
+    const data = rows.map((row) => ({
+      ...row,
+      linked: row.status === "connected",
+      hasQr: row.status === "qr",
+      pairingCode: null,
+    }));
 
     return c.json({ ok: true, data });
   })
@@ -240,30 +229,13 @@ export const whatsappRouter = new Hono<HonoAppType>()
       throw new HTTPException(404, { message: "Not found" });
     }
 
-    let gatewayStatus: gateway.GatewaySessionStatus | null = null;
-    try {
-      gatewayStatus = await gateway.getGatewaySessionStatus(c.env, row.gatewaySessionId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn("[WhatsApp] Failed to get gateway session status", {
-        error: message,
-        gatewaySessionId: row.gatewaySessionId,
-      });
-    }
-
-    const status = gatewayStatus?.status ?? row.status;
-    if (status !== row.status) {
-      await db.updateWhatsAppSession(c.var.db, row.id, { status });
-    }
-
     return c.json({
       ok: true,
       data: {
         ...row,
-        status,
-        linked: gatewayStatus?.linked ?? false,
-        hasQr: gatewayStatus?.hasQr ?? false,
-        pairingCode: gatewayStatus?.pairingCode ?? null,
+        linked: row.status === "connected",
+        hasQr: row.status === "qr",
+        pairingCode: null,
       },
     });
   })
@@ -279,6 +251,13 @@ export const whatsappRouter = new Hono<HonoAppType>()
     }
 
     const body = await c.req.json<UpdateWhatsAppSessionBody>();
+    if (body.agentId) {
+      const agent = await getPersonalAgentById(c.var.db, body.agentId);
+      if (!agent || agent.userId !== user.id) {
+        throw new HTTPException(400, { message: "Invalid agent assignment" });
+      }
+    }
+
     const row = await db.updateWhatsAppSession(c.var.db, existing.id, parseUpdateBody(body));
     return c.json({ ok: true, data: row });
   })

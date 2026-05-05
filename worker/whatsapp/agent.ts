@@ -14,6 +14,7 @@ const logger = getLogger([LOGGER_NAME, "whatsapp-bot"]);
 
 export interface WhatsAppBotProps {
   sessionId: string;
+  agentId?: string | null;
   agentName: string;
   systemPrompt: string;
   model: string;

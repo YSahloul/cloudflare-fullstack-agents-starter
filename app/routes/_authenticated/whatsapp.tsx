@@ -85,7 +85,7 @@ function WhatsAppPage() {
   const activeSessionQuery = useGetWhatsAppSessionQuery(activeSessionId ?? "");
   const activeSession = activeSessionQuery.data;
 
-  const showQr = activeSession?.status === "qr" && !!activeSession?.hasQr;
+  const showQr = activeSession?.status === "qr";
   const qrQuery = useGetQrQuery(showQr && activeSession ? activeSession.id : "");
 
   useEffect(() => {
@@ -333,7 +333,7 @@ function WhatsAppPage() {
                     WhatsApp → Linked Devices → Link with phone number → enter this code
                   </p>
                 </div>
-              ) : activeSession.status === "qr" && activeSession.hasQr ? (
+              ) : activeSession.status === "qr" ? (
                 <div className="text-center">
                   {qrQuery.data?.qr ? (
                     <img
