@@ -1,4 +1,4 @@
-import type { MCPServersState } from "agents";
+import type { MCPServer, MCPServersState } from "agents";
 
 /**
  * Connection status for the WebSocket
@@ -24,12 +24,7 @@ export type AgentUiState = "initializing" | "noServer" | "needsAuth" | "failed" 
 /**
  * Server info for display
  */
-export type McpServerInfo = {
-  name: string;
-  state: string;
-  server_url: string;
-  auth_url?: string | null;
-};
+export type McpServerInfo = MCPServer;
 
 /**
  * Tool info for display
@@ -37,4 +32,5 @@ export type McpServerInfo = {
 export type McpToolInfo = {
   name: string;
   description?: string;
+  serverId: string;
 };

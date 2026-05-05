@@ -39,17 +39,20 @@ export function createAgentStore() {
 
   function setMcpState(mcpState: MCPServersState) {
     const serverIds = Object.keys(mcpState.servers);
+    const existingSelectedServerId = state.selectedServerId;
 
-    if (serverIds.length > 1) {
-      console.warn(
-        `[Agent Store] Multiple servers detected (${serverIds.length}). Using first server: ${serverIds[0]}`,
-      );
-    }
+    const selectedServerId =
+      existingSelectedServerId && mcpState.servers[existingSelectedServerId]
+        ? existingSelectedServerId
+        : (serverIds.find((serverId) => mcpState.servers[serverId]?.state === "ready") ??
+          serverIds.find((serverId) => mcpState.servers[serverId]?.state === "authenticating") ??
+          serverIds[0] ??
+          null);
 
     state = {
       ...state,
       mcpState,
-      selectedServerId: serverIds[0] || null,
+      selectedServerId,
       error: null,
     };
     notify();

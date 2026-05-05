@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import type { Connection, WSMessage } from "agents";
+import { type Connection, callable, type WSMessage } from "agents";
 import { AIChatAgent } from "agents/ai-chat-agent";
 import type { StreamTextOnFinishCallback, ToolSet } from "ai";
 import { convertToModelMessages, streamText } from "ai";
@@ -40,7 +40,8 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
     this.userId = null;
 
     // Set up MCP observability listener to capture connection events
-    this.setUpMcpObservability();
+    this.observability = createObservability(logger);
+    logger.debug("[MCP Observability] Observability handler configured");
 
     ctx.blockConcurrencyWhile(async () => {
       // Initialize personalAgentId, personalAgentName, and userId to their persisted values
@@ -51,17 +52,6 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
       // Run drizzle migrations
       await migrate(this.db, migrations);
     });
-  }
-
-  /**
-   * Set up observability listener for MCP events
-   * This captures internal MCP client events for debugging
-   */
-  private setUpMcpObservability() {
-    // The agents SDK uses an observability interface that we can set
-    // This will capture all MCP connection events including errors
-    this.observability = createObservability(logger);
-    logger.debug("[MCP Observability] Observability handler configured");
   }
 
   /**
@@ -86,6 +76,17 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
     await this.ctx.storage.put("personalAgentId", personalAgentId);
     await this.ctx.storage.put("personalAgentName", personalAgentName);
     await this.ctx.storage.put("userId", userId);
+  }
+
+  async onStart(): Promise<void> {
+    this.configureMcpOAuthCallback();
+  }
+
+  private configureMcpOAuthCallback(): void {
+    this.mcp.configureOAuthCallback({
+      successRedirect: `${this.env.BETTER_AUTH_URL}/personal-agents/auth/success?personalAgentId=${encodeURIComponent(this.personalAgentId ?? "")}`,
+      errorRedirect: `${this.env.BETTER_AUTH_URL}/personal-agents/auth/error`,
+    });
   }
 
   /**
@@ -175,19 +176,50 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
     }
   }
 
-  /**
-   * Manually trigger re-initialization of MCP server
-   * Useful for debugging connection issues
-   * Can be called via RPC from the client
-   */
-  async reinitializeMcpServer(name: string, url: string, headers?: Record<string, string>) {
-    logger.info("[MCP] Manual reinitialization requested", { name, url, headers });
+  @callable({ description: "Add an MCP server to this personal agent" })
+  async addMcpServerCallable(
+    name: string,
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<{ state: string; serverId?: string; authUrl?: string }> {
+    const serverState = this.getMcpServers();
+    const existingServer = Object.entries(serverState.servers).find(
+      ([_serverId, server]) => server.server_url === url,
+    );
 
-    // First, try to get the current server state
-    await this.removeMcpServerByUrl(url);
+    if (existingServer) {
+      const [serverId, server] = existingServer;
+      return {
+        state: server.state,
+        serverId,
+        authUrl: server.auth_url ?? undefined,
+      };
+    }
 
-    // Re-register the server
-    await this.ensureMcpServerRegistered(name, url, headers);
+    const callbackHost = this.env.BETTER_AUTH_URL;
+    const result = await this.addMcpServer(name, url, callbackHost, CF_AGENTS_ROUTING_PREFIX, {
+      transport: {
+        type: "streamable-http",
+        headers,
+      },
+    });
+
+    return {
+      state: result.state,
+      serverId: result.id,
+      authUrl: result.authUrl,
+    };
+  }
+
+  @callable({ description: "Remove an MCP server from this personal agent" })
+  async removeMcpServerCallable(serverId: string): Promise<boolean> {
+    await this.removeMcpServer(serverId);
+    return true;
+  }
+
+  @callable({ description: "Get MCP server state for this personal agent" })
+  async getMcpServerListCallable(): Promise<ReturnType<PersonalAgent["getMcpServers"]>> {
+    return this.getMcpServers();
   }
 
   /**
@@ -269,117 +301,13 @@ export class PersonalAgent extends AIChatAgent<CloudflareBindings> {
 
   /**
    * WebSocket message handling
-   *
-   * @param connection - The connection that the message was received on
-   * @param message - The websocket message that was received
-   * @returns void
    */
   async onMessage(connection: Connection, message: WSMessage) {
-    if (typeof message === "string") {
-      try {
-        const parsed = JSON.parse(message);
-        logger.debug("[WS] Received message", { parsed });
-
-        // Handle custom message types
-        // TODO - Add shared types between client and server for ws messages
-        if (parsed.type === "mcp:reset") {
-          logger.info("[WS] Received MCP reset request");
-          try {
-            const result = await this.reinitializeMcpServer(
-              parsed?.name,
-              parsed?.url,
-              parsed?.headers,
-            );
-            connection.send(
-              JSON.stringify({
-                type: "mcp:reset:success",
-                data: result,
-              }),
-            );
-          } catch (error) {
-            logger.error("[WS] Failed to reset MCP server", {
-              error: prepareErrorForLogging(error),
-            });
-            connection.send(
-              JSON.stringify({
-                type: "mcp:reset:error",
-                error: error instanceof Error ? error.message : "Unknown error",
-              }),
-            );
-          }
-        }
-
-        // Delegate to AIChatAgent to handle (e.g.) chat messages
-        await super.onMessage(connection, message);
-      } catch (error) {
-        logger.error("[WS] Error parsing message", {
-          message,
-          error: prepareErrorForLogging(error),
-        });
-      }
-    }
+    await super.onMessage(connection, message);
   }
 
-  /**
-   * @hack - This is a very hacky workaround to the issue where the MCP server is still in a connecting state after the DO awakens from hibernation.
-   *         The issue is that the state is not "authenticating" when the DO wakes up, since it re-initializes the MCP server connection.
-   *         Without this workaround, the auth will intermittently fail with an error like "agent is not in the 'authenticating' state"
-   */
   override async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    // Detect OAuth callback
-    const isOAuthCallback = url.pathname.includes("/callback/") && url.searchParams.has("code");
-
-    if (isOAuthCallback) {
-      logger.info("[OAuth] Callback detected, adding delay to allow state sync");
-
-      // Extract server ID from callback URL path (last segment after /callback/)
-      const pathSegments = url.pathname.split("/");
-      const callbackIndex = pathSegments.indexOf("callback");
-      const serverId =
-        callbackIndex !== -1 && callbackIndex < pathSegments.length - 1
-          ? pathSegments[callbackIndex + 1]
-          : undefined;
-
-      // If necessary, wait for the specific server to reach authenticating state
-      if (serverId && this.mcp.mcpConnections[serverId]) {
-        const targetServer = this.mcp.mcpConnections[serverId];
-        const shouldWait = targetServer.connectionState !== "authenticating";
-
-        if (shouldWait) {
-          logger.info("[OAuth] Target server not in authenticating state, waiting for sync", {
-            serverId,
-            currentState: targetServer.connectionState,
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          const serverState = this.getMcpServers();
-          const targetServerState = serverState.servers[serverId];
-          logger.info("[OAuth] State after delay", {
-            serverId,
-            state: targetServerState?.state,
-            url: targetServerState?.server_url,
-          });
-        }
-      } else {
-        logger.warn("[OAuth] Could not extract server ID from callback URL or server not found", {
-          serverId,
-          pathname: url.pathname,
-        });
-      }
-
-      // Configure OAuth callback to redirect to success page
-      this.mcp.configureOAuthCallback({
-        // On the frontend, this is the page `_oauthLayout.personal-agents.auth.success.tsx`
-        successRedirect: `${this.env.BETTER_AUTH_URL}/personal-agents/auth/success?personalAgentId=${encodeURIComponent(this.personalAgentId ?? "")}`,
-        // On the frontend, this is the page `_oauthLayout.personal-agents.auth.error.tsx`
-        errorRedirect: `${this.env.BETTER_AUTH_URL}/personal-agents/auth/error`,
-      });
-    }
-
-    // Proceed with normal request handling
+    this.configureMcpOAuthCallback();
     return super.fetch(request);
   }
 

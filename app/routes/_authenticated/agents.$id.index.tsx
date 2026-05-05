@@ -1,10 +1,23 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useAgentChat } from "agents/ai-react";
-import { ArrowLeft, Bot, Loader2, MessageSquareText, Pencil, Send, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  Bot,
+  ExternalLink,
+  Loader2,
+  MessageSquareText,
+  Pencil,
+  Plug,
+  Send,
+  Trash2,
+  Wrench,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "@/app/components/Markdown";
+import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
+import { Label } from "@/app/components/ui/label";
 import { Skeleton } from "@/app/components/ui/skeleton";
 import { useHandler } from "@/app/hooks/useHandler";
 import { useAgentConnection } from "@/app/lib/agent-state";
@@ -27,12 +40,29 @@ function AgentDetails() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
   const [inputValue, setInputValue] = useState("");
+  const [mcpServerName, setMcpServerName] = useState("");
+  const [mcpServerUrl, setMcpServerUrl] = useState("");
+  const [mcpHeadersText, setMcpHeadersText] = useState("{}");
+  const [mcpFeedback, setMcpFeedback] = useState<string | null>(null);
+  const [isMcpSubmitting, setIsMcpSubmitting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { agent: agentConnection } = useAgentConnection({ agentId: id });
+  const { agent: agentConnection, mcpState, servers, tools } = useAgentConnection({ agentId: id });
   const chat = useAgentChat({
     agent: agentConnection,
   });
+
+  const toolsByServerId = useMemo(() => {
+    const grouped = new Map<string, typeof tools>();
+
+    for (const tool of tools) {
+      const existingTools = grouped.get(tool.serverId) ?? [];
+      existingTools.push(tool);
+      grouped.set(tool.serverId, existingTools);
+    }
+
+    return grouped;
+  }, [tools]);
 
   const scrollToBottom = useHandler(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -96,6 +126,76 @@ function AgentDetails() {
 
     setInputValue("");
   };
+
+  function parseMcpHeaders(): Record<string, string> {
+    const parsed = JSON.parse(mcpHeadersText) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Headers must be a JSON object.");
+    }
+
+    const headers: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== "string") {
+        throw new Error(`Header "${key}" must have a string value.`);
+      }
+
+      headers[key] = value;
+    }
+
+    return headers;
+  }
+
+  async function handleAddMcpServer() {
+    if (!mcpServerName.trim() || !mcpServerUrl.trim()) {
+      setMcpFeedback("Server name and URL are required.");
+      return;
+    }
+
+    setIsMcpSubmitting(true);
+    setMcpFeedback(null);
+
+    try {
+      const headers = parseMcpHeaders();
+      const result = await agentConnection.call<{
+        state: string;
+        serverId?: string;
+        authUrl?: string;
+      }>("addMcpServerCallable", [mcpServerName.trim(), mcpServerUrl.trim(), headers]);
+
+      setMcpFeedback("MCP server saved.");
+      setMcpServerName("");
+      setMcpServerUrl("");
+      setMcpHeadersText("{}");
+
+      if (result.authUrl) {
+        window.open(
+          result.authUrl,
+          "mcp-auth",
+          "width=640,height=800,resizable=yes,scrollbars=yes",
+        );
+      }
+    } catch (error) {
+      setMcpFeedback(error instanceof Error ? error.message : "Failed to add MCP server.");
+    } finally {
+      setIsMcpSubmitting(false);
+    }
+  }
+
+  async function handleRemoveMcpServer(serverId: string) {
+    setIsMcpSubmitting(true);
+    setMcpFeedback(null);
+
+    try {
+      await agentConnection.call("removeMcpServerCallable", [serverId]);
+      setMcpFeedback("MCP server removed.");
+    } catch (error) {
+      setMcpFeedback(error instanceof Error ? error.message : "Failed to remove MCP server.");
+    } finally {
+      setIsMcpSubmitting(false);
+    }
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -186,6 +286,163 @@ function AgentDetails() {
               <Trash2 className="h-4 w-4" />
             )}
           </Button>
+        </div>
+      </div>
+
+      <div className="shrink-0 rounded-lg border bg-card p-4 shadow-sm">
+        <div className="mb-4 flex items-center gap-2">
+          <Plug className="h-4 w-4 text-primary" />
+          <h2 className="text-base font-semibold text-card-foreground">MCP Servers & Tools</h2>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="mcp-server-name">Server Name</Label>
+              <Input
+                id="mcp-server-name"
+                value={mcpServerName}
+                onChange={(e) => setMcpServerName(e.target.value)}
+                placeholder="Research Tools"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="mcp-server-url">Server URL</Label>
+              <Input
+                id="mcp-server-url"
+                value={mcpServerUrl}
+                onChange={(e) => setMcpServerUrl(e.target.value)}
+                placeholder="https://example.com/mcp"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="mcp-server-headers">Optional Headers (JSON)</Label>
+            <textarea
+              id="mcp-server-headers"
+              value={mcpHeadersText}
+              onChange={(e) => setMcpHeadersText(e.target.value)}
+              className="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 min-h-24 w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
+              placeholder='{"Authorization":"Bearer ..."}'
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={() => void handleAddMcpServer()} disabled={isMcpSubmitting}>
+              {isMcpSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plug className="h-4 w-4" />
+              )}
+              Add MCP Server
+            </Button>
+            {mcpFeedback ? (
+              <output className="text-sm text-muted-foreground">{mcpFeedback}</output>
+            ) : null}
+          </div>
+
+          <div className="space-y-3">
+            {servers.length === 0 ? (
+              <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                No MCP servers configured yet.
+              </div>
+            ) : (
+              servers.map(([serverId, mcpServer]) => {
+                const serverTools = toolsByServerId.get(serverId) ?? [];
+                const statusVariant =
+                  mcpServer.state === "ready"
+                    ? "default"
+                    : mcpServer.state === "failed"
+                      ? "destructive"
+                      : "secondary";
+
+                return (
+                  <div key={serverId} className="rounded-md border p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-foreground">{mcpServer.name}</p>
+                          <Badge variant={statusVariant}>{mcpServer.state}</Badge>
+                          <Badge variant="outline">{serverTools.length} tools</Badge>
+                        </div>
+                        <p className="break-all text-sm text-muted-foreground">
+                          {mcpServer.server_url}
+                        </p>
+                        {mcpServer.state === "failed" ? (
+                          <p className="text-sm text-destructive">
+                            This server failed to connect. Re-authorize it or verify the URL and
+                            headers.
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {mcpServer.auth_url ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              window.open(
+                                mcpServer.auth_url ?? "",
+                                "mcp-auth",
+                                "width=640,height=800,resizable=yes,scrollbars=yes",
+                              );
+                            }}
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Authorize
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleRemoveMcpServer(serverId)}
+                          disabled={isMcpSubmitting}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Wrench className="h-4 w-4 text-muted-foreground" />
+                        <p className="text-sm font-medium text-foreground">Tools</p>
+                      </div>
+
+                      {serverTools.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No tools discovered yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {serverTools.map((tool) => (
+                            <div
+                              key={`${serverId}:${tool.name}`}
+                              className="rounded-md bg-muted/40 p-3"
+                            >
+                              <p className="text-sm font-medium text-foreground">{tool.name}</p>
+                              {tool.description ? (
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  {tool.description}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {mcpState?.resources && mcpState.resources.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {mcpState.resources.length} MCP resources discovered.
+            </p>
+          ) : null}
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import type { MCPServersState } from "agents";
 import { useAgent } from "agents/react";
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useMemo, useRef, useSyncExternalStore } from "react";
 import { deriveUiState, getDisableReason } from "./derive-ui-state";
 import { type AgentStore, createAgentStore } from "./store";
 import type { McpServerInfo, McpToolInfo } from "./types";
@@ -46,37 +46,7 @@ export function useAgentConnection(options: UseAgentConnectionOptions) {
     onMcpUpdate: (mcpState: MCPServersState) => {
       console.log("[Agent Connection] MCP state update:", mcpState);
       store.setMcpState(mcpState);
-    },
-    onMessage: (message) => {
-      console.log("[Agent Connection] Raw message received:", message.data);
-      try {
-        const parsed = JSON.parse(message.data) as {
-          type: string;
-          data?: MCPServersState;
-          error?: string;
-        };
-
-        if (parsed.type === "mcp:reset:success") {
-          console.log("[Agent Connection] MCP reset successful:", parsed.data);
-          store.setResetInFlight(false);
-          if (parsed.data) {
-            store.setMcpState({
-              servers: parsed.data.servers || {},
-              tools: parsed.data.tools || [],
-              prompts: parsed.data.prompts || [],
-              resources: parsed.data.resources || [],
-            });
-          }
-        }
-
-        if (parsed.type === "mcp:reset:error") {
-          console.error("[Agent Connection] MCP reset failed:", parsed.error);
-          store.setResetInFlight(false);
-          store.setError({ message: parsed.error || "Reset failed" });
-        }
-      } catch (error) {
-        console.error("[Agent Connection] Error parsing message:", error);
-      }
+      store.setResetInFlight(false);
     },
   });
 
@@ -93,26 +63,13 @@ export function useAgentConnection(options: UseAgentConnectionOptions) {
     return state.mcpState.servers[state.selectedServerId] as McpServerInfo | undefined;
   }, [state.selectedServerId, state.mcpState]);
 
-  // Get tools
+  const servers: Array<[string, McpServerInfo]> = useMemo(() => {
+    return Object.entries(state.mcpState?.servers ?? {}) as Array<[string, McpServerInfo]>;
+  }, [state.mcpState]);
+
   const tools: McpToolInfo[] = useMemo(() => {
     return (state.mcpState?.tools || []) as McpToolInfo[];
   }, [state.mcpState]);
-
-  // Reset connection handler
-  const resetConnection = useCallback(() => {
-    if (!confirm("Reset MCP connection? This will clear the current state and try to reconnect.")) {
-      return;
-    }
-
-    console.log("[Agent Connection] Sending reset request...");
-
-    store.setResetInFlight(true);
-    agent.send(
-      JSON.stringify({
-        type: "mcp:reset",
-      }),
-    );
-  }, [agent, store]);
 
   return {
     agent,
@@ -120,9 +77,10 @@ export function useAgentConnection(options: UseAgentConnectionOptions) {
     canStartReview,
     disableReason,
     server,
+    servers,
     tools,
+    mcpState: state.mcpState,
     error: state.error,
-    resetConnection,
     connectionStatus: state.connectionStatus,
     resetInFlight: state.resetInFlight,
   };

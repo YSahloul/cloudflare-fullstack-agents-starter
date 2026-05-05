@@ -7,41 +7,35 @@ import type { AgentConnectionState, AgentUiState } from "./types";
 export function deriveUiState(state: AgentConnectionState): AgentUiState {
   const { connectionStatus, mcpState, selectedServerId } = state;
 
-  // If we're not connected yet or have no MCP state, we're initializing
   if (connectionStatus === "connecting" || !mcpState) {
     return "initializing";
   }
 
-  // Connection error
   if (connectionStatus === "error") {
     return "failed";
   }
 
-  // No servers available
-  if (Object.keys(mcpState.servers).length === 0) {
+  const serverIds = Object.keys(mcpState.servers);
+
+  if (serverIds.length === 0) {
     return "noServer";
   }
 
-  // Check selected server state
-  if (selectedServerId) {
-    const server = mcpState.servers[selectedServerId];
+  const selectedServer = selectedServerId ? mcpState.servers[selectedServerId] : undefined;
+  const servers = selectedServer ? [selectedServer] : Object.values(mcpState.servers);
 
-    if (server) {
-      if (server.state === "ready") {
-        return "ready";
-      }
-
-      if (server.state === "authenticating") {
-        return "needsAuth";
-      }
-
-      if (server.state === "failed") {
-        return "failed";
-      }
-    }
+  if (servers.some((server) => server.state === "ready")) {
+    return "ready";
   }
 
-  // Default to initializing if state is unclear
+  if (servers.some((server) => server.state === "authenticating")) {
+    return "needsAuth";
+  }
+
+  if (servers.every((server) => server.state === "failed")) {
+    return "failed";
+  }
+
   return "initializing";
 }
 
