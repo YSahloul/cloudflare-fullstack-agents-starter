@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import { drizzle } from "drizzle-orm/d1";
+import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { nanoid } from "nanoid";
@@ -100,6 +100,37 @@ function getWebhookStatus(payload: unknown): string | null {
 
   const status = (payload as StatusWebhookPayload).status;
   return typeof status === "string" && status.trim() ? status : null;
+}
+
+function serializeSession(row: schema.WhatsAppSessionSelect) {
+  return {
+    ...row,
+    linked: row.status === "connected",
+    hasQr: row.status === "qr",
+    pairingCode: null,
+  };
+}
+
+async function getOwnedSessionBySlug(
+  d1: DrizzleD1Database<typeof schema>,
+  userId: string,
+  slug: string,
+) {
+  return db.getWhatsAppSessionByDisplayNameAndUserId(d1, userId, slug);
+}
+
+async function ensureOwnedSessionBySlug(
+  d1: DrizzleD1Database<typeof schema>,
+  userId: string,
+  slug: string,
+) {
+  const existing = await getOwnedSessionBySlug(d1, userId, slug);
+
+  if (existing) {
+    return existing;
+  }
+
+  return db.createWhatsAppSession(d1, parseCreateBody({ displayName: slug }, userId));
 }
 
 export const whatsappRouter = new Hono<HonoAppType>()
@@ -271,12 +302,7 @@ export const whatsappRouter = new Hono<HonoAppType>()
     }
 
     const rows = await db.listWhatsAppSessionsByUserId(c.var.db, user.id);
-    const data = rows.map((row) => ({
-      ...row,
-      linked: row.status === "connected",
-      hasQr: row.status === "qr",
-      pairingCode: null,
-    }));
+    const data = rows.map(serializeSession);
 
     return c.json({ ok: true, data });
   })
@@ -303,12 +329,7 @@ export const whatsappRouter = new Hono<HonoAppType>()
 
     return c.json({
       ok: true,
-      data: {
-        ...row,
-        linked: row.status === "connected",
-        hasQr: row.status === "qr",
-        pairingCode: null,
-      },
+      data: serializeSession(row),
     });
   })
   .patch("/sessions/:id", dbProvider, async (c) => {
@@ -463,4 +484,123 @@ export const whatsappRouter = new Hono<HonoAppType>()
 
     await gateway.sendWhatsAppText(c.env, existing.gatewaySessionId, body.chatId, body.text);
     return c.json({ ok: true });
+  });
+
+export const whatsappTenantRouter = new Hono<HonoAppType>()
+  .use("*", dbProvider)
+  .get("/:slug/whatsapp/session", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const slug = c.req.param("slug").trim();
+    const session = await getOwnedSessionBySlug(c.var.db, user.id, slug);
+
+    if (!session) {
+      return c.json({ status: "STOPPED", error: "Session not found" });
+    }
+
+    return c.json(serializeSession(session));
+  })
+  .post("/:slug/whatsapp/session", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const slug = c.req.param("slug").trim();
+    if (!slug) {
+      throw new HTTPException(400, { message: "slug required" });
+    }
+
+    const session = await ensureOwnedSessionBySlug(c.var.db, user.id, slug);
+    const status = await gateway.startGatewaySession(
+      c.env,
+      session.gatewaySessionId,
+      getAppWebhookConfig(c),
+    );
+    const updated = await db.updateWhatsAppSession(c.var.db, session.id, {
+      status: status.status ?? "connecting",
+    });
+
+    return c.json(serializeSession(updated));
+  })
+  .get("/:slug/whatsapp/qr", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const slug = c.req.param("slug").trim();
+    const session = await getOwnedSessionBySlug(c.var.db, user.id, slug);
+    if (!session) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+
+    const data = await gateway.getGatewaySessionQr(c.env, session.gatewaySessionId);
+    return c.json({
+      ...data,
+      image: data.qr ?? null,
+      value: data.raw ?? null,
+    });
+  })
+  .post("/:slug/whatsapp/pair", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const slug = c.req.param("slug").trim();
+    if (!slug) {
+      throw new HTTPException(400, { message: "slug required" });
+    }
+
+    const body = await c.req.json<{ phone?: string }>();
+    if (!body.phone) {
+      throw new HTTPException(400, { message: "phone required" });
+    }
+
+    const session = await ensureOwnedSessionBySlug(c.var.db, user.id, slug);
+    const result = await gateway.requestGatewayPairCode(c.env, session.gatewaySessionId, {
+      phone: body.phone,
+      ...getAppWebhookConfig(c),
+    });
+    await db.updateWhatsAppSession(c.var.db, session.id, { status: result.status ?? "pairing" });
+
+    return c.json(result);
+  })
+  .post("/:slug/whatsapp/stop", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const slug = c.req.param("slug").trim();
+    const session = await getOwnedSessionBySlug(c.var.db, user.id, slug);
+    if (!session) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+
+    const result = await gateway.stopGatewaySession(c.env, session.gatewaySessionId);
+    await db.updateWhatsAppSession(c.var.db, session.id, { status: "stopped" });
+
+    return c.json(result);
+  })
+  .post("/:slug/whatsapp/logout", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const slug = c.req.param("slug").trim();
+    const session = await getOwnedSessionBySlug(c.var.db, user.id, slug);
+    if (!session) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+
+    const result = await gateway.logoutGatewaySession(c.env, session.gatewaySessionId);
+    await db.updateWhatsAppSession(c.var.db, session.id, { status: "logged_out" });
+
+    return c.json(result);
   });

@@ -8,12 +8,10 @@ import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Skeleton } from "@/app/components/ui/skeleton";
 import {
-  useCreateWhatsAppSessionMutation,
+  listWhatsAppSessionsQueryOptions,
   useGetQrQuery,
   useGetWhatsAppSessionQuery,
   useListWhatsAppSessionsQuery,
-  usePairCodeMutation,
-  useStartSessionMutation,
   WHATSAPP_KEY,
 } from "@/app/lib/queries/whatsapp";
 
@@ -69,9 +67,6 @@ function formatPairCode(code: string) {
 function WhatsAppPage() {
   const qc = useQueryClient();
   const { data: sessions, isLoading, isError } = useListWhatsAppSessionsQuery();
-  const create = useCreateWhatsAppSessionMutation();
-  const start = useStartSessionMutation();
-  const pair = usePairCodeMutation();
 
   const [sid, setSid] = useState("default");
   const [phone, setPhone] = useState("");
@@ -158,15 +153,11 @@ function WhatsAppPage() {
     }
   }
 
-  async function ensureSession(sessionName: string) {
-    const existing = sessions?.find(
+  async function refreshAndResolveSession(sessionName: string) {
+    const refreshedSessions = await qc.fetchQuery(listWhatsAppSessionsQueryOptions());
+    return refreshedSessions.find(
       (session) => session.id === sessionName || session.displayName === sessionName,
     );
-    if (existing) {
-      return existing;
-    }
-
-    return create.mutateAsync({ displayName: sessionName });
   }
 
   async function handleStart(usePair: boolean) {
@@ -185,31 +176,68 @@ function WhatsAppPage() {
     }
 
     try {
-      const session = await ensureSession(sessionName);
-      setActiveSessionId(session.id);
       setLocalPairCode(null);
 
       if (usePair) {
-        setCachedSessionStatus(session.id, "pairing");
         setActionMessage("Requesting pair code...");
-        await fetch(`/api/whatsapp/sessions/${session.id}/logout`, { method: "POST" }).catch(
-          () => null,
+        const response = await fetch(
+          `/api/tenants/${encodeURIComponent(sessionName)}/whatsapp/pair`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone: cleanPhone }),
+          },
         );
-        const result = await pair.mutateAsync({ id: session.id, phone: cleanPhone });
+        const result = (await response.json().catch(() => ({}))) as {
+          code?: string;
+          message?: string;
+          status?: string;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "Failed to request pair code");
+        }
+
+        const session = await refreshAndResolveSession(sessionName);
+        if (session) {
+          setActiveSessionId(session.id);
+          setCachedSessionStatus(session.id, result.status ?? "pairing");
+        }
+
         if (result.code) {
           setLocalPairCode(result.code);
-          setCachedSessionStatus(session.id, "pairing");
           setActionMessage("Pair code ready.");
         } else {
           setActionMessage(result.message ?? result.status ?? "Pair code requested.");
         }
       } else {
-        setCachedSessionStatus(session.id, "connecting");
         setActionMessage("Starting connection...");
-        await start.mutateAsync(session.id);
-      }
+        const response = await fetch(
+          `/api/tenants/${encodeURIComponent(sessionName)}/whatsapp/session`,
+          {
+            method: "POST",
+          },
+        );
+        const result = (await response.json().catch(() => ({}))) as {
+          id?: string;
+          status?: string;
+        };
 
-      await refresh(session.id);
+        if (!response.ok) {
+          throw new Error("Failed to start session");
+        }
+
+        const session = result.id
+          ? await refreshAndResolveSession(result.id)
+          : await refreshAndResolveSession(sessionName);
+
+        if (session) {
+          setActiveSessionId(session.id);
+          setCachedSessionStatus(session.id, result.status ?? "connecting");
+          await refresh(session.id);
+        }
+      }
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : String(caughtError);
       setError(message);
@@ -305,11 +333,7 @@ function WhatsAppPage() {
           />
           <Button
             onClick={() => void handleStart(false)}
-            disabled={create.isPending || start.isPending || pair.isPending}
           >
-            {create.isPending || start.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : null}
             Start / Connect
           </Button>
         </div>
@@ -323,9 +347,7 @@ function WhatsAppPage() {
           <Button
             variant="outline"
             onClick={() => void handleStart(true)}
-            disabled={create.isPending || start.isPending || pair.isPending}
           >
-            {pair.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Pair by phone
           </Button>
         </div>
