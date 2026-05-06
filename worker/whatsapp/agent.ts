@@ -1,6 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { getLogger } from "@logtape/logtape";
-import { AIChatAgent } from "agents/ai-chat-agent";
+import { AIChatAgent } from "@cloudflare/ai-chat";
 import type { StreamTextOnFinishCallback, ToolSet, UIMessage } from "ai";
 import { convertToModelMessages, streamText } from "ai";
 import { createAiGateway } from "ai-gateway-provider";
@@ -40,6 +40,17 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
 
   async onStart(props: Record<string, unknown>): Promise<void> {
     this.props = props as unknown as WhatsAppBotProps;
+
+    logger.info("[WhatsApp] Conversation DO started", {
+      sessionId: this.props.sessionId,
+      agentId: this.props.agentId ?? null,
+      agentName: this.props.agentName,
+      model: this.props.model,
+      autoReply: this.props.autoReply,
+      groupPolicy: this.props.groupPolicy,
+      dmPolicy: this.props.dmPolicy,
+      hasSystemPrompt: Boolean(this.props.systemPrompt?.trim()),
+    });
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -65,13 +76,35 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
 
       const message = parseWhatsAppWebhook(body);
       const text = message.text?.trim();
+
+      logger.info("[WhatsApp] Conversation DO received message", {
+        sessionId: body.session,
+        event: body.event,
+        from: body.payload?.from,
+        fromMe: body.payload?.fromMe,
+        type: body.payload?.type,
+        isGroup: body.payload?.isGroup,
+        hasText: Boolean(text),
+        textLength: text?.length ?? 0,
+      });
+
       if (!text) {
-        logger.debug("[WhatsApp] Captured message without replyable text");
+        logger.debug("[WhatsApp] Captured message without replyable text", {
+          sessionId: body.session,
+          from: body.payload?.from,
+          type: body.payload?.type,
+        });
         return new Response("OK");
       }
 
       const formattedText = formatWhatsAppInboundMessageForModel(message);
       await this.captureInboundMessage(formattedText);
+
+      logger.info("[WhatsApp] Inbound message captured", {
+        sessionId: body.session,
+        messageCount: this.messages.length,
+        formattedTextLength: formattedText.length,
+      });
 
       if (!this.props) {
         logger.error("[WhatsApp] No props loaded for conversation DO");
@@ -84,29 +117,55 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
         groupPolicy: this.props.groupPolicy,
         dmPolicy: this.props.dmPolicy,
       });
-      logger.debug("[WhatsApp] Reply decision", { reason: decision.reason });
+      logger.info("[WhatsApp] Reply decision", {
+        reason: decision.reason,
+        shouldReply: decision.shouldReply,
+        sessionId: body.session,
+        from: body.payload?.from,
+      });
+
       if (!decision.shouldReply) {
         return new Response("OK");
       }
 
       let reply = "";
       try {
-        reply = await this.runInference(text);
+        reply = await this.runInference();
       } catch (error) {
-        logger.error("Inference error", { error: prepareErrorForLogging(error) });
+        logger.error("[WhatsApp] Inference error", {
+          sessionId: body.session,
+          from: body.payload?.from,
+          error: prepareErrorForLogging(error),
+        });
         reply = "Sorry, I couldn't verify that right now.";
       }
 
       if (!reply) {
+        logger.warn("[WhatsApp] Inference returned empty reply", {
+          sessionId: body.session,
+          from: body.payload?.from,
+        });
         return new Response("OK");
       }
+
+      logger.info("[WhatsApp] Reply generated", {
+        sessionId: body.session,
+        from: body.payload?.from,
+        replyLength: reply.length,
+      });
 
       await this.captureAssistantReply(reply);
 
       try {
         await sendWhatsAppText(this.env, this.props.sessionId, message.sender, reply);
+        logger.info("[WhatsApp] Reply sent to gateway", {
+          sessionId: this.props.sessionId,
+          to: message.sender,
+          replyLength: reply.length,
+        });
       } catch (error) {
         logger.error("[WhatsApp] Failed to send reply", {
+          sessionId: this.props.sessionId,
           error: prepareErrorForLogging(error),
           to: message.sender,
         });
@@ -129,11 +188,18 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
   private refreshPropsFromRequest(request: Request): void {
     const rawProps = request.headers.get("x-partykit-props");
     if (!rawProps) {
+      logger.warn("[WhatsApp] Missing x-partykit-props header");
       return;
     }
 
     try {
       this.props = JSON.parse(rawProps) as WhatsAppBotProps;
+      logger.debug("[WhatsApp] Props refreshed from request", {
+        sessionId: this.props.sessionId,
+        agentId: this.props.agentId ?? null,
+        agentName: this.props.agentName,
+        model: this.props.model,
+      });
     } catch (error) {
       logger.warn("[WhatsApp] Failed to parse agent props header", {
         error: prepareErrorForLogging(error),
@@ -161,28 +227,44 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
     await this.persistMessages(this.messages);
   }
 
-  private async runInference(userText: string): Promise<string> {
+  private async runInference(): Promise<string> {
     if (!this.props) {
       throw new Error("No props");
     }
 
-    if (this.props.agentId) {
-      const personalAgentId = this.env.PersonalAgent.idFromName(this.props.agentId);
-      const personalAgentStub = this.env.PersonalAgent.get(personalAgentId);
-      const delegatedReply = await personalAgentStub.runResearch(userText, "whatsapp");
-      return delegatedReply.trim();
-    }
-
+    const tools = this.mcp.getAITools() as unknown as ToolSet;
+    const toolNames = Object.keys(tools);
     const messages = convertToModelMessages(this.messages);
+    const start = Date.now();
+
+    logger.info("[WhatsApp] Starting inference", {
+      sessionId: this.props.sessionId,
+      model: this.props.model,
+      messageCount: this.messages.length,
+      toolCount: toolNames.length,
+      toolNames,
+      maxTokens: this.props.maxTokens ?? 900,
+      temperature: (this.props.temperature ?? 20) / 100,
+    });
+
     const result = streamText({
       model: this.getGatewayModel(),
       system: this.buildPrompt(),
-      messages,
+      messages: await messages,
+      tools,
       maxOutputTokens: this.props.maxTokens ?? 900,
       temperature: (this.props.temperature ?? 20) / 100,
     });
 
-    return (await result.text).trim();
+    const text = (await result.text).trim();
+
+    logger.info("[WhatsApp] Inference completed", {
+      sessionId: this.props.sessionId,
+      durationMs: Date.now() - start,
+      replyLength: text.length,
+    });
+
+    return text;
   }
 
   private buildPrompt(): string {
@@ -234,10 +316,20 @@ export class WhatsAppBotAgent extends AIChatAgent<CloudflareBindings> {
 
     const messages = convertToModelMessages(this.messages);
 
+    const tools = this.mcp.getAITools() as unknown as ToolSet;
+
+    logger.info("[WhatsApp] Starting chat inference", {
+      sessionId: this.props.sessionId,
+      model: this.props.model,
+      messageCount: this.messages.length,
+      toolCount: Object.keys(tools).length,
+    });
+
     const result = streamText({
       model: this.getGatewayModel(),
       system: this.buildPrompt(),
-      messages,
+      messages: await messages,
+      tools,
       onFinish,
       abortSignal: options?.abortSignal,
     });

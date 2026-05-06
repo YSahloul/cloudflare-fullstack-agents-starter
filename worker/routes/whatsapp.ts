@@ -125,8 +125,19 @@ export const whatsappRouter = new Hono<HonoAppType>()
     const d1 = drizzle(c.env.DB, { schema });
     const gatewaySessionId = rawBody.session;
 
+    logger.info("[WhatsApp] Webhook received", {
+      event: rawBody.event,
+      gatewaySessionId,
+      hasPayload: rawBody.payload !== undefined,
+    });
+
     if (rawBody.event === "session.status") {
       const status = getWebhookStatus(rawBody.payload);
+      logger.info("[WhatsApp] Session status webhook", {
+        gatewaySessionId,
+        status,
+      });
+
       if (status) {
         await db.updateWhatsAppSessionByGatewaySessionId(d1, gatewaySessionId, { status });
       }
@@ -137,9 +148,22 @@ export const whatsappRouter = new Hono<HonoAppType>()
     const messageBody = rawBody as BaileysWebhook;
     const session = await db.getWhatsAppSessionByGatewaySessionId(d1, gatewaySessionId);
     if (!session) {
-      logger.debug(`[WhatsApp] No session for gatewaySession=${gatewaySessionId}`);
+      logger.warn("[WhatsApp] No session found for webhook", {
+        gatewaySessionId,
+        event: rawBody.event,
+      });
       return c.text("OK", 200);
     }
+
+    logger.info("[WhatsApp] Session resolved for webhook", {
+      gatewaySessionId,
+      sessionId: session.id,
+      sessionStatus: session.status,
+      sessionAgentId: session.agentId,
+      autoReply: session.autoReply,
+      groupPolicy: session.groupPolicy,
+      dmPolicy: session.dmPolicy,
+    });
 
     let chatThreadKey: string;
     try {
@@ -157,6 +181,15 @@ export const whatsappRouter = new Hono<HonoAppType>()
     const threadKey = `${gatewaySessionId}:${chatThreadKey}`;
     const origin = new URL(c.req.url).origin;
 
+    logger.info("[WhatsApp] Conversation resolved", {
+      gatewaySessionId,
+      chatThreadKey,
+      threadKey,
+      assignedAgentId: assignedAgent?.id ?? null,
+      assignedAgentName: assignedAgent?.agentName ?? null,
+      agentBelongsToSessionOwner,
+    });
+
     const props: WhatsAppBotProps = {
       sessionId: gatewaySessionId,
       agentId: agentBelongsToSessionOwner ? assignedAgent.id : null,
@@ -172,6 +205,16 @@ export const whatsappRouter = new Hono<HonoAppType>()
       dmPolicy: session.dmPolicy as WhatsAppBotProps["dmPolicy"],
       autoReply: agentBelongsToSessionOwner ? (session.autoReply ?? true) : false,
     };
+
+    logger.info("[WhatsApp] DO props prepared", {
+      threadKey,
+      agentName: props.agentName,
+      model: props.model,
+      autoReply: props.autoReply,
+      groupPolicy: props.groupPolicy,
+      dmPolicy: props.dmPolicy,
+      hasSystemPrompt: Boolean(props.systemPrompt?.trim()),
+    });
 
     const doId = c.env.WhatsAppBotAgent.idFromName(threadKey);
     const stub = c.env.WhatsAppBotAgent.get(doId);
@@ -191,10 +234,31 @@ export const whatsappRouter = new Hono<HonoAppType>()
     );
 
     try {
-      return await stub.fetch(doReq);
+      const start = Date.now();
+      logger.info("[WhatsApp] Dispatching webhook to conversation DO", {
+        threadKey,
+        event: messageBody.event,
+        from: messageBody.payload?.from,
+        type: messageBody.payload?.type,
+        isGroup: messageBody.payload?.isGroup,
+        hasBody: typeof messageBody.payload?.body === "string" && messageBody.payload.body.trim().length > 0,
+      });
+
+      const response = await stub.fetch(doReq);
+
+      logger.info("[WhatsApp] Conversation DO completed", {
+        threadKey,
+        status: response.status,
+        durationMs: Date.now() - start,
+      });
+
+      return response;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error("[WhatsApp] DO error", { error: message });
+      logger.error("[WhatsApp] DO error", {
+        threadKey,
+        error: message,
+      });
       return c.json({ message: "DO error", error: message }, 500);
     }
   })

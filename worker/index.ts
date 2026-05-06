@@ -48,5 +48,4 @@ app.onError((error, c) => {
 
 export default app;
 
-export { PersonalAgent } from "./agent/durable-object";
 export { WhatsAppBotAgent } from "./whatsapp/agent";

@@ -1,12 +1,8 @@
 import { zValidator } from "@hono/zod-validator";
-import { getLogger } from "@logtape/logtape";
-import { routeAgentRequest } from "agents";
 import { Hono } from "hono";
-import { createFactory } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { validator } from "hono/validator";
 import { z } from "zod";
-import { CF_AGENTS_ROUTING_PREFIX, LOGGER_NAME } from "../constants";
 import {
   archivePersonalAgent,
   createPersonalAgent,
@@ -17,84 +13,6 @@ import {
 import { authorizePersonalAgentForUser } from "../lib/auth/authorization";
 import { dbProvider } from "../lib/dbProvider";
 import type { HonoAppType } from "../types";
-
-const logger = getLogger([LOGGER_NAME, "api"]);
-
-const factory = createFactory<HonoAppType>();
-
-/**
- * Create a typesafe handler that can be reused and mounted at multiple Hono routes
- *
- * Validates path parameters to be able to access them type-safely in the handler
- *
- * @note - We do this to support the routing of the agents sdk, which requires that
- *         we support both `/agents/:agentName/:agentId` and `/agents/:agentName/:agentId/**`
- *         the latter of which is necessary to support auth of MCP servers.
- */
-const agentsHandlers = factory.createHandlers(
-  dbProvider,
-  validator("param", (value, _c) => {
-    const { agentId, agentName } = value;
-
-    if (typeof agentId !== "string" || typeof agentName !== "string") {
-      throw new HTTPException(400, {
-        message: "Invalid agent identifiers in the path",
-      });
-    }
-
-    return {
-      agentId,
-      agentName,
-    };
-  }),
-  async (c) => {
-    const db = c.var.db;
-    const user = c.get("user");
-    const { agentId } = c.req.valid("param");
-
-    // The agentId IS the personalAgentId (agents SDK routing convention)
-    const personalAgent = await getPersonalAgentById(db, agentId);
-
-    if (!personalAgent) {
-      logger.warn("[Agent Route] Personal agent not found", { agentId });
-      throw new HTTPException(404, { message: "Personal agent not found" });
-    }
-
-    // Verify the personal agent belongs to the user
-    authorizePersonalAgentForUser(user, personalAgent);
-
-    const agentStubId = c.env.PersonalAgent.idFromName(personalAgent.id);
-    const agentStub = c.env.PersonalAgent.get(agentStubId);
-
-    // Set the name on the stub to fix "Attempting to read .name" error
-    // We need to do this because when we hydrate, we automatically try to connect to MCP servers
-    //
-    // See also: https://github.com/cloudflare/workerd/issues/2240
-    await agentStub.setName?.(personalAgent.id);
-
-    // Hydrate the agent with the personal agent data
-    await agentStub.hydrate({
-      personalAgentId: personalAgent.id,
-      personalAgentName: personalAgent.agentName,
-      userId: user.id,
-      systemPrompt: personalAgent.systemPrompt,
-      model: personalAgent.model,
-      temperature: personalAgent.temperature,
-      maxTokens: personalAgent.maxTokens,
-    });
-
-    // Send the request to the agent
-    const agentResponse = await routeAgentRequest(c.req.raw, c.env, {
-      prefix: CF_AGENTS_ROUTING_PREFIX,
-    });
-
-    if (agentResponse) {
-      return agentResponse;
-    }
-
-    return c.json({ message: "Agent not found" }, { status: 404 });
-  },
-);
 
 export const agentsRouter = new Hono<HonoAppType>()
   .use("*", dbProvider)
@@ -139,18 +57,6 @@ export const agentsRouter = new Hono<HonoAppType>()
         model,
         temperature,
         maxTokens,
-      });
-
-      const agentStubId = c.env.PersonalAgent.idFromName(personalAgent.id);
-      const agentStub = c.env.PersonalAgent.get(agentStubId);
-      await agentStub.hydrate({
-        personalAgentId: personalAgent.id,
-        personalAgentName: personalAgent.agentName,
-        userId: user.id,
-        systemPrompt: personalAgent.systemPrompt,
-        model: personalAgent.model,
-        temperature: personalAgent.temperature,
-        maxTokens: personalAgent.maxTokens,
       });
 
       return c.json(personalAgent, 201);
@@ -222,22 +128,6 @@ export const agentsRouter = new Hono<HonoAppType>()
         maxTokens,
       });
 
-      // Update the durable object with new data
-      const agentStubId = c.env.PersonalAgent.idFromName(id);
-      const agentStub = c.env.PersonalAgent.get(agentStubId);
-
-      // Hydrate the durable object with updated data
-      // This will also re-register the MCP server if the URL has changed
-      await agentStub.hydrate({
-        personalAgentId: id,
-        personalAgentName: updatedPersonalAgent.agentName,
-        userId: user.id,
-        systemPrompt: updatedPersonalAgent.systemPrompt,
-        model: updatedPersonalAgent.model,
-        temperature: updatedPersonalAgent.temperature,
-        maxTokens: updatedPersonalAgent.maxTokens,
-      });
-
       return c.json(updatedPersonalAgent);
     },
   )
@@ -260,5 +150,4 @@ export const agentsRouter = new Hono<HonoAppType>()
 
     return c.json(archivedPersonalAgent);
   })
-  .all("/:agentName/:agentId", ...agentsHandlers)
-  .all("/:agentName/:agentId/*", ...agentsHandlers);
+;
