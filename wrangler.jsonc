@@ -67,7 +67,11 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["WhatsAppBotAgent"]
+      "new_sqlite_classes": ["PersonalAgent", "WhatsAppBotAgent"]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": ["PersonalAgent"]
     }
   ],
   /**
@@ -116,7 +120,11 @@
       "migrations": [
         {
           "tag": "v1",
-          "new_sqlite_classes": ["WhatsAppBotAgent"]
+          "new_sqlite_classes": ["PersonalAgent", "WhatsAppBotAgent"]
+        },
+        {
+          "tag": "v2",
+          "deleted_classes": ["PersonalAgent"]
         }
       ],
       "services": [
