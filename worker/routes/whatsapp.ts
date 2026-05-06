@@ -612,7 +612,7 @@ export const whatsappCurrentUserRouter = new Hono<HonoAppType>()
 
 export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
   .use("*", dbProvider)
-  .get("/:slug/session", async (c) => {
+  .get("/:slug/whatsapp/session", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -627,7 +627,7 @@ export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
 
     return c.json(serializeSession(session));
   })
-  .post("/:slug/session", async (c) => {
+  .post("/:slug/whatsapp/session", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -650,7 +650,7 @@ export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
 
     return c.json(serializeSession(updated));
   })
-  .get("/:slug/qr", async (c) => {
+  .get("/:slug/whatsapp/qr", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -669,7 +669,7 @@ export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
       value: data.raw ?? null,
     });
   })
-  .post("/:slug/pair", async (c) => {
+  .post("/:slug/whatsapp/pair", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -694,7 +694,7 @@ export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
 
     return c.json(result);
   })
-  .post("/:slug/stop", async (c) => {
+  .post("/:slug/whatsapp/stop", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -711,7 +711,7 @@ export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
 
     return c.json(result);
   })
-  .post("/:slug/logout", async (c) => {
+  .post("/:slug/whatsapp/logout", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
