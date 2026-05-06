@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { logger as honoLogger } from "hono/logger";
 import { coreApi } from "./routes/api";
-import { whatsappRouter, whatsappTenantRouter } from "./routes/whatsapp";
+import { whatsappCurrentUserRouter, whatsappNamedSessionRouter, whatsappRouter } from "./routes/whatsapp";
 
 // Initialize logger
 import "./lib/logger";
@@ -25,7 +25,9 @@ const app = new Hono<HonoAppType>()
   })
   .route("/api/v1", coreApi)
   .route("/api/whatsapp", whatsappRouter)
-  .route("/api/tenants", whatsappTenantRouter);
+  .route("/api/whatsapp/me", whatsappCurrentUserRouter)
+  .route("/api/whatsapp/by-name", whatsappNamedSessionRouter)
+  .route("/api/tenants", whatsappNamedSessionRouter);
 
 app.onError((error, c) => {
   logger.error("API Error", { error: prepareErrorForLogging(error) });

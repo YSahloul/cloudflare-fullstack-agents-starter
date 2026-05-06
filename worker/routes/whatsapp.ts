@@ -133,6 +133,26 @@ async function ensureOwnedSessionBySlug(
   return db.createWhatsAppSession(d1, parseCreateBody({ displayName: slug }, userId));
 }
 
+async function getPrimarySessionForUser(
+  d1: DrizzleD1Database<typeof schema>,
+  userId: string,
+) {
+  return db.getLatestWhatsAppSessionByUserId(d1, userId);
+}
+
+async function ensurePrimarySessionForUser(
+  d1: DrizzleD1Database<typeof schema>,
+  userId: string,
+) {
+  const existing = await getPrimarySessionForUser(d1, userId);
+
+  if (existing) {
+    return existing;
+  }
+
+  return db.createWhatsAppSession(d1, parseCreateBody({ displayName: "WhatsApp" }, userId));
+}
+
 export const whatsappRouter = new Hono<HonoAppType>()
   // ── Public webhook (no user auth; protected by X-Api-Key) ────────────────
   .post("/webhook", async (c) => {
@@ -486,9 +506,113 @@ export const whatsappRouter = new Hono<HonoAppType>()
     return c.json({ ok: true });
   });
 
-export const whatsappTenantRouter = new Hono<HonoAppType>()
+export const whatsappCurrentUserRouter = new Hono<HonoAppType>()
   .use("*", dbProvider)
-  .get("/:slug/whatsapp/session", async (c) => {
+  .get("/session", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const session = await getPrimarySessionForUser(c.var.db, user.id);
+    if (!session) {
+      return c.json({ status: "STOPPED", error: "Session not found" });
+    }
+
+    return c.json(serializeSession(session));
+  })
+  .post("/session", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const session = await ensurePrimarySessionForUser(c.var.db, user.id);
+    const status = await gateway.startGatewaySession(
+      c.env,
+      session.gatewaySessionId,
+      getAppWebhookConfig(c),
+    );
+    const updated = await db.updateWhatsAppSession(c.var.db, session.id, {
+      status: status.status ?? "connecting",
+    });
+
+    return c.json(serializeSession(updated));
+  })
+  .get("/qr", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const session = await getPrimarySessionForUser(c.var.db, user.id);
+    if (!session) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+
+    const data = await gateway.getGatewaySessionQr(c.env, session.gatewaySessionId);
+    return c.json({
+      ...data,
+      image: data.qr ?? null,
+      value: data.raw ?? null,
+    });
+  })
+  .post("/pair", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const body = await c.req.json<{ phone?: string }>();
+    if (!body.phone) {
+      throw new HTTPException(400, { message: "phone required" });
+    }
+
+    const session = await ensurePrimarySessionForUser(c.var.db, user.id);
+    const result = await gateway.requestGatewayPairCode(c.env, session.gatewaySessionId, {
+      phone: body.phone,
+      ...getAppWebhookConfig(c),
+    });
+    await db.updateWhatsAppSession(c.var.db, session.id, { status: result.status ?? "pairing" });
+
+    return c.json(result);
+  })
+  .post("/stop", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const session = await getPrimarySessionForUser(c.var.db, user.id);
+    if (!session) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+
+    const result = await gateway.stopGatewaySession(c.env, session.gatewaySessionId);
+    await db.updateWhatsAppSession(c.var.db, session.id, { status: "stopped" });
+
+    return c.json(result);
+  })
+  .post("/logout", async (c) => {
+    const user = c.get("user");
+    if (!user) {
+      throw new HTTPException(401, { message: "Unauthorized" });
+    }
+
+    const session = await getPrimarySessionForUser(c.var.db, user.id);
+    if (!session) {
+      throw new HTTPException(404, { message: "Not found" });
+    }
+
+    const result = await gateway.logoutGatewaySession(c.env, session.gatewaySessionId);
+    await db.updateWhatsAppSession(c.var.db, session.id, { status: "logged_out" });
+
+    return c.json(result);
+  });
+
+export const whatsappNamedSessionRouter = new Hono<HonoAppType>()
+  .use("*", dbProvider)
+  .get("/:slug/session", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -503,7 +627,7 @@ export const whatsappTenantRouter = new Hono<HonoAppType>()
 
     return c.json(serializeSession(session));
   })
-  .post("/:slug/whatsapp/session", async (c) => {
+  .post("/:slug/session", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -526,7 +650,7 @@ export const whatsappTenantRouter = new Hono<HonoAppType>()
 
     return c.json(serializeSession(updated));
   })
-  .get("/:slug/whatsapp/qr", async (c) => {
+  .get("/:slug/qr", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -545,7 +669,7 @@ export const whatsappTenantRouter = new Hono<HonoAppType>()
       value: data.raw ?? null,
     });
   })
-  .post("/:slug/whatsapp/pair", async (c) => {
+  .post("/:slug/pair", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -570,7 +694,7 @@ export const whatsappTenantRouter = new Hono<HonoAppType>()
 
     return c.json(result);
   })
-  .post("/:slug/whatsapp/stop", async (c) => {
+  .post("/:slug/stop", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });
@@ -587,7 +711,7 @@ export const whatsappTenantRouter = new Hono<HonoAppType>()
 
     return c.json(result);
   })
-  .post("/:slug/whatsapp/logout", async (c) => {
+  .post("/:slug/logout", async (c) => {
     const user = c.get("user");
     if (!user) {
       throw new HTTPException(401, { message: "Unauthorized" });

@@ -51,6 +51,19 @@ export async function listWhatsAppSessionsByUserId(
     .orderBy(desc(schema.whatsappSessions.createdAt));
 }
 
+export async function getLatestWhatsAppSessionByUserId(
+  db: DrizzleD1Database<typeof schema>,
+  userId: string,
+) {
+  const [session] = await db
+    .select()
+    .from(schema.whatsappSessions)
+    .where(eq(schema.whatsappSessions.userId, userId))
+    .orderBy(desc(schema.whatsappSessions.createdAt));
+
+  return session ?? null;
+}
+
 export async function createWhatsAppSession(
   db: DrizzleD1Database<typeof schema>,
   data: Omit<schema.WhatsAppSessionInsert, "createdAt" | "updatedAt">,

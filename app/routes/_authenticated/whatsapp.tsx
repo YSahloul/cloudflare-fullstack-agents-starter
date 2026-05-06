@@ -66,9 +66,9 @@ function formatPairCode(code: string) {
 
 function WhatsAppPage() {
   const qc = useQueryClient();
+  const { auth } = Route.useRouteContext();
   const { data: sessions, isLoading, isError } = useListWhatsAppSessionsQuery();
 
-  const [sid, setSid] = useState("default");
   const [phone, setPhone] = useState("");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -136,6 +136,14 @@ function WhatsAppPage() {
     return sessions?.filter((session) => session.id !== activeSessionId) ?? [];
   }, [activeSessionId, sessions]);
 
+  useEffect(() => {
+    if (activeSessionId || !sessions?.length) {
+      return;
+    }
+
+    setActiveSessionId(sessions[0].id);
+  }, [activeSessionId, sessions]);
+
   function setCachedSessionStatus(sessionId: string, status: string) {
     qc.setQueryData([WHATSAPP_KEY, "session", sessionId], (old: typeof activeSession) =>
       old ? { ...old, status } : old,
@@ -153,20 +161,20 @@ function WhatsAppPage() {
     }
   }
 
-  async function refreshAndResolveSession(sessionName: string) {
+  async function refreshAndResolvePrimarySession() {
     const refreshedSessions = await qc.fetchQuery(listWhatsAppSessionsQueryOptions());
-    return refreshedSessions.find(
-      (session) => session.id === sessionName || session.displayName === sessionName,
-    );
+    return refreshedSessions[0] ?? null;
   }
 
+  const sessionSlug = auth.user?.id ?? "";
+
   async function handleStart(usePair: boolean) {
-    const sessionName = sid.trim();
     const cleanPhone = phone.replace(/\D/g, "");
     setError("");
     setActionMessage("");
 
-    if (!sessionName) {
+    if (!sessionSlug) {
+      setError("You must be signed in to manage a WhatsApp session.");
       return;
     }
 
@@ -181,7 +189,7 @@ function WhatsAppPage() {
       if (usePair) {
         setActionMessage("Requesting pair code...");
         const response = await fetch(
-          `/api/tenants/${encodeURIComponent(sessionName)}/whatsapp/pair`,
+          `/api/tenants/${encodeURIComponent(sessionSlug)}/whatsapp/pair`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -199,7 +207,7 @@ function WhatsAppPage() {
           throw new Error(result.error ?? "Failed to request pair code");
         }
 
-        const session = await refreshAndResolveSession(sessionName);
+        const session = await refreshAndResolvePrimarySession();
         if (session) {
           setActiveSessionId(session.id);
           setCachedSessionStatus(session.id, result.status ?? "pairing");
@@ -214,7 +222,7 @@ function WhatsAppPage() {
       } else {
         setActionMessage("Starting connection...");
         const response = await fetch(
-          `/api/tenants/${encodeURIComponent(sessionName)}/whatsapp/session`,
+          `/api/tenants/${encodeURIComponent(sessionSlug)}/whatsapp/session`,
           {
             method: "POST",
           },
@@ -228,9 +236,7 @@ function WhatsAppPage() {
           throw new Error("Failed to start session");
         }
 
-        const session = result.id
-          ? await refreshAndResolveSession(result.id)
-          : await refreshAndResolveSession(sessionName);
+        const session = await refreshAndResolvePrimarySession();
 
         if (session) {
           setActiveSessionId(session.id);
@@ -250,7 +256,9 @@ function WhatsAppPage() {
     setActionMessage("Stopping...");
     setCachedSessionStatus(sessionId, "stopped");
     try {
-      const res = await fetch(`/api/whatsapp/sessions/${sessionId}/stop`, { method: "POST" });
+      const res = await fetch(`/api/tenants/${encodeURIComponent(sessionSlug)}/whatsapp/stop`, {
+        method: "POST",
+      });
       if (!res.ok) {
         throw new Error("Failed to stop session");
       }
@@ -269,7 +277,9 @@ function WhatsAppPage() {
     setActionMessage("Logging out...");
     setCachedSessionStatus(sessionId, "logged_out");
     try {
-      const res = await fetch(`/api/whatsapp/sessions/${sessionId}/logout`, { method: "POST" });
+      const res = await fetch(`/api/tenants/${encodeURIComponent(sessionSlug)}/whatsapp/logout`, {
+        method: "POST",
+      });
       if (!res.ok) {
         throw new Error("Failed to logout session");
       }
@@ -311,7 +321,6 @@ function WhatsAppPage() {
 
   async function pickSession(sessionId: string) {
     setActiveSessionId(sessionId);
-    setSid(sessionId);
     setError("");
     setLocalPairCode(null);
     await qc.invalidateQueries({ queryKey: [WHATSAPP_KEY, "session", sessionId] });
@@ -325,17 +334,9 @@ function WhatsAppPage() {
       </div>
 
       <div className="rounded-xl border bg-card p-5 shadow-sm">
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder="session id (e.g. tenant-slug)"
-            value={sid}
-            onChange={(event) => setSid(event.target.value)}
-          />
-          <Button
-            onClick={() => void handleStart(false)}
-          >
-            Start / Connect
-          </Button>
+        <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground">
+          <span>Your WhatsApp session is tied to your logged-in account.</span>
+          <Button onClick={() => void handleStart(false)}>Start / Connect</Button>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
